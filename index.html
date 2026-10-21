@@ -526,7 +526,7 @@
                         <div className="p-4 md:p-8 max-w-6xl mx-auto">
 {currentView === 'admin' && <AdminDashboard classes={classes} addClass={addClass} updateClass={updateClass} deleteClass={deleteClass} navigateTo={navigateTo} />}
                             {currentView === 'report_approval' && <PendingReportsView classes={classes} updateClass={updateClass} navigateTo={navigateTo} />}
-                            {currentView === 'dashboard' && <UserDashboard user={user} navigateTo={navigateTo} />}
+                            {currentView === 'dashboard' && <UserDashboard user={user} navigateTo={navigateTo} classes={classes} />}
                             {currentView === 'document' && <DocumentViewer doc={activeDoc} navigateTo={navigateTo} classes={classes} user={user} setViewingFile={setViewingFile} />}
                             {currentView === 'report_list' && (
                                 <ReportListView 
@@ -783,12 +783,28 @@
             );
         }
 
-        function UserDashboard({ user, navigateTo }) {
+        function UserDashboard({ user, navigateTo, classes = [] }) {
+            const isWolmunSchoolUser = isSchoolMatch(user.school, '화성월문초등학교') || 
+                                       isSchoolMatch(user.school, '화성월문초') || 
+                                       (typeof user.school === 'string' && user.school.includes('월문'));
+
             const banners = [
                 { id: 'plan', title: '수업운영 계획서', dbTypes: ['수업운영 계획서'], desc: '해당 학기의 전반적인 수업 운영 계획입니다.', iconImg: 'JEM S Video EN_.png', color: 'bg-white/85 border-white/60', textColor: 'text-robogram-blue', roles: ['teacher', 'instructor'] },
                 { id: 'report', title: '차시별 수업보고서', dbTypes: ['차시별 수업보고서'], desc: '매 수업 진행 후 작성 및 확인하는 보고서입니다.', iconImg: 'ROBOME Video EN_.png', color: 'bg-white/85 border-white/60', textColor: 'text-robogram-orange', roles: ['teacher', 'instructor'] },
                 { id: 'satisfaction', title: '만족도 조사 보고서', dbTypes: ['학생만족도 보고서', '만족도 조사 보고서'], desc: '종강 후 학생들의 수업 만족도 결과입니다.', icon: <i className="fas fa-check-circle text-[24px]"></i>, color: 'bg-white/85 border-white/60', textColor: 'text-green-600', roles: ['teacher', 'instructor'] },
-                { id: 'achievement', title: '수업성취도 보고서', dbTypes: ['수업성취도 보고서', '수업 성취도 보고서'], desc: '학생들의 학업 성취도 평가 결과입니다.', icon: <i className="fas fa-users text-[24px]"></i>, color: 'bg-white/85 border-white/60', textColor: 'text-purple-600', roles: ['teacher', 'instructor'] }
+                { 
+                    id: 'achievement', 
+                    title: '수업성취도 보고서', 
+                    dbTypes: ['수업성취도 보고서', '수업 성취도 보고서'], 
+                    desc: (user.role === 'teacher' && isWolmunSchoolUser)
+                        ? '화성월문초등학교는 학교측 요청으로 로보미 아바타 및 잼S 수업성취도 평가를 미실시하여 보고서가 존재하지 않습니다.'
+                        : '학생들의 학업 성취도 평가 결과입니다.', 
+                    icon: <i className="fas fa-users text-[24px]"></i>, 
+                    color: 'bg-white/85 border-white/60', 
+                    textColor: 'text-purple-600', 
+                    roles: ['teacher', 'instructor'],
+                    badge: (user.role === 'teacher' && isWolmunSchoolUser) ? '학교측 요청 미실시' : null
+                }
             ];
 
             const visibleBanners = banners.filter(b => b.roles.includes(user.role));
@@ -808,8 +824,14 @@
                                     if (banner.id === 'report') navigateTo('report_list');
                                     else navigateTo('document', banner);
                                 }}
-                                className={`group p-8 rounded-[2rem] border transition-all hover:shadow-xl text-left flex flex-col gap-4 ${banner.color}`}
+                                className={`group p-8 rounded-[2rem] border transition-all hover:shadow-xl text-left flex flex-col gap-4 relative overflow-hidden ${banner.color}`}
                             >
+                                {banner.badge && (
+                                    <span className="self-start text-xs font-black bg-amber-100 text-amber-800 border border-amber-300/80 px-2.5 py-1 rounded-full shadow-sm flex items-center gap-1.5">
+                                        <i className="fas fa-info-circle text-amber-600"></i>
+                                        {banner.badge}
+                                    </span>
+                                )}
                                 <div className={`flex items-center gap-4 ${banner.textColor}`}>
                                     {banner.iconImg ? (
                                         <img src={banner.iconImg} alt={banner.title} className="w-16 h-16 object-contain" />
@@ -1405,9 +1427,21 @@
                                                                 <span className={`text-[10px] px-2 py-0.5 rounded-md font-bold border transition ${hasPlan ? 'bg-green-50 text-green-700 border-green-200' : 'bg-red-50 text-red-500 border-red-200'}`}>
                                                                     계획서
                                                                 </span>
-                                                                <span className={`text-[10px] px-2 py-0.5 rounded-md font-bold border transition ${hasAchievement ? 'bg-green-50 text-green-700 border-green-200' : 'bg-red-50 text-red-500 border-red-200'}`}>
-                                                                    성취도
-                                                                </span>
+                                                                {(() => {
+                                                                    const isWolmunClass = isSchoolMatch(c.school, '화성월문초등학교') || isSchoolMatch(c.school, '화성월문초') || (typeof c.school === 'string' && c.school.includes('월문'));
+                                                                    if (isWolmunClass) {
+                                                                        return (
+                                                                            <span className="text-[10px] px-2 py-0.5 rounded-md font-bold border transition bg-amber-50 text-amber-700 border-amber-200" title="화성월문초등학교: 학교측 요청으로 성취도 평가 미실시">
+                                                                                성취도(미실시)
+                                                                            </span>
+                                                                        );
+                                                                    }
+                                                                    return (
+                                                                        <span className={`text-[10px] px-2 py-0.5 rounded-md font-bold border transition ${hasAchievement ? 'bg-green-50 text-green-700 border-green-200' : 'bg-red-50 text-red-500 border-red-200'}`}>
+                                                                            성취도
+                                                                        </span>
+                                                                    );
+                                                                })()}
                                                                 <span className={`text-[10px] px-2 py-0.5 rounded-md font-bold border transition ${hasSatisfaction ? 'bg-green-50 text-green-700 border-green-200' : 'bg-red-50 text-red-500 border-red-200'}`}>
                                                                     만족도
                                                                 </span>
@@ -1653,8 +1687,23 @@
                 return schoolMatch && nameMatch;
             }) : [];
 
+            // 화성월문초등학교 로보미아바타 & 잼S 학교측 요청 성취도 평가 미실시 예외 처리
+            const isWolmunSchoolUser = isSchoolMatch(user.school, '화성월문초등학교') || 
+                                       isSchoolMatch(user.school, '화성월문초') ||
+                                       (typeof user.school === 'string' && user.school.includes('월문'));
+
+            const wolmunExemptClasses = userClasses.filter(c => {
+                const schoolMatch = isSchoolMatch(c.school, '화성월문초등학교') || 
+                                    isSchoolMatch(c.school, '화성월문초') ||
+                                    (typeof c.school === 'string' && c.school.includes('월문')) ||
+                                    isWolmunSchoolUser;
+                return schoolMatch;
+            });
+
+            const hasWolmunExempt = isWolmunSchoolUser || wolmunExemptClasses.length > 0;
             const hasErrorClass = errorClasses.length > 0;
-            const hasNormalClass = user.role !== 'teacher' || userClasses.length > errorClasses.length;
+            // 화성월문초(학교요청 미실시) 또는 접속오류 제외 정상 수업이 있을 때만 외부 평가 대시보드(roboeval) 접속 안내 노출
+            const hasNormalClass = user.role !== 'teacher' || (userClasses.length > errorClasses.length && !hasWolmunExempt);
 
             const handleFileOpen = (file) => {
                 if ((file.name.toLowerCase().endsWith('.html') || file.name.toLowerCase().endsWith('.pdf')) && file.content) {
@@ -1681,7 +1730,14 @@
                                     </div>
                                 )}
                                 <div>
-                                    <h2 className="text-3xl font-black text-gray-800 leading-tight break-keep">{doc.title}</h2>
+                                    <div className="flex flex-wrap items-center gap-3">
+                                        <h2 className="text-3xl font-black text-gray-800 leading-tight break-keep">{doc.title}</h2>
+                                        {doc.id === 'achievement' && hasWolmunExempt && (
+                                            <span className="text-xs bg-amber-100 text-amber-800 font-black px-3 py-1 rounded-full border border-amber-300 shadow-sm shrink-0 flex items-center gap-1">
+                                                <i className="fas fa-info-circle text-amber-600"></i> 학교측 요청 미실시
+                                            </span>
+                                        )}
+                                    </div>
                                     <p className="text-gray-600 text-base font-medium mt-1 break-keep">소속 학교: {user.school}</p>
                                 </div>
                             </div>
@@ -1690,6 +1746,55 @@
                         <div className="max-w-4xl mx-auto">
                             {doc.id === 'achievement' && (
                                 <>
+                                    {hasWolmunExempt && (() => {
+                                        const exemptClassNames = wolmunExemptClasses.length > 0 
+                                            ? wolmunExemptClasses.map(c => c.name).join(', ') 
+                                            : '로보미 아바타, 잼S (JEM S) 전 수업';
+                                        return (
+                                            <div className="mb-8 p-7 bg-amber-50/95 border border-amber-200 rounded-2xl shadow-sm text-amber-950 leading-relaxed break-keep font-medium relative overflow-hidden group">
+                                                <div className="absolute -right-6 -bottom-6 opacity-[0.06] text-[130px] text-amber-700 pointer-events-none select-none">
+                                                    <i className="fas fa-file-signature"></i>
+                                                </div>
+                                                <div className="flex items-center gap-2 mb-3.5">
+                                                    <span className="bg-amber-600 text-white text-xs font-black px-2.5 py-1 rounded-md uppercase tracking-wider shadow-sm flex items-center gap-1">
+                                                        <i className="fas fa-info-circle text-[11px]"></i> 학교측 요청
+                                                    </span>
+                                                    <h4 className="text-xl font-black text-amber-950">
+                                                        수업성취도 평가 미실시 안내
+                                                    </h4>
+                                                </div>
+                                                <p className="text-sm md:text-base text-amber-900 font-bold mb-4">
+                                                    화성월문초등학교 수업은 <strong className="text-amber-950 underline underline-offset-4 font-black">학교측의 요청</strong>으로 수업성취도 평가를 실시하지 않았으며, 이에 따라 수업성취도 보고서가 존재하지 않습니다.
+                                                </p>
+                                                <div className="space-y-3 text-[13.5px] bg-white/85 p-5 rounded-xl border border-amber-200/70 shadow-inner leading-relaxed">
+                                                    <div className="flex flex-col gap-2.5">
+                                                        <div className="flex items-center gap-2">
+                                                            <span className="font-black text-amber-950 min-w-[85px]">대상 학교 :</span>
+                                                            <span className="font-bold text-gray-800">화성월문초등학교</span>
+                                                        </div>
+                                                        <div className="flex items-center gap-2">
+                                                            <span className="font-black text-amber-950 min-w-[85px]">대상 수업 :</span>
+                                                            <span className="font-black text-amber-800 bg-amber-100/90 px-2.5 py-1 rounded text-xs">
+                                                                {exemptClassNames}
+                                                            </span>
+                                                        </div>
+                                                        <div className="flex items-start gap-2">
+                                                            <span className="font-black text-amber-950 min-w-[85px] shrink-0">안내 사항 :</span>
+                                                            <span className="text-gray-800">
+                                                                화성월문초등학교의 <strong>로보미 아바타</strong> 및 <strong>잼S(JEM S)</strong> 수업은 학교측의 공식 요청에 따라 학생 수업성취도 평가를 진행하지 않았습니다. 이에 따라 본 대시보드 및 외부 평가 시스템(roboeval 등)에 성취도 평가 데이터 및 결과 보고서가 일체 생성되지 않음을 알려드립니다. 선생님께서는 이용에 착오 없으시길 바랍니다.
+                                                            </span>
+                                                        </div>
+                                                        <div className="flex items-start gap-2 pt-2.5 border-t border-amber-100">
+                                                            <span className="font-black text-amber-950 min-w-[85px] shrink-0">기타 문서 :</span>
+                                                            <span className="text-gray-600 text-xs">
+                                                                수업운영 계획서, 차시별 수업보고서, 만족도 조사 보고서는 상단 <strong>[대시보드로 돌아가기]</strong> 버튼 클릭 후 각 메뉴에서 정상적으로 확인하실 수 있습니다.
+                                                            </span>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        );
+                                    })()}
                                     {hasErrorClass && (
                                         <div className="mb-8 p-7 bg-red-50/95 border border-red-200 rounded-2xl shadow-sm text-red-900 leading-relaxed break-keep font-medium relative overflow-hidden group">
                                             <div className="absolute -right-6 -bottom-6 opacity-[0.04] text-[120px] text-red-700 pointer-events-none select-none">
@@ -1807,7 +1912,15 @@
                                     <i className="fas fa-folder-open text-5xl text-gray-400 mb-4"></i>
                                     <p className="text-gray-700 font-bold text-lg break-keep">
                                         {doc.id === 'achievement' ? (
-                                            <>성취도 평가 결과는 위의 안내된 접속 주소와 방법을 참고하여 전용 플랫폼에서 조회해 주시기 바랍니다.</>
+                                            hasWolmunExempt ? (
+                                                <span className="text-amber-900 font-bold">
+                                                    화성월문초등학교는 학교측 요청으로 수업성취도 평가를 미실시하여 등록된 성취도 보고서가 존재하지 않습니다.
+                                                </span>
+                                            ) : hasErrorClass && !hasNormalClass ? (
+                                                <>학번데이터 접속 오류로 인해 성취도 평가 결과를 정상적으로 조회할 수 없습니다.</>
+                                            ) : (
+                                                <>성취도 평가 결과는 위의 안내된 접속 주소와 방법을 참고하여 전용 플랫폼에서 조회해 주시기 바랍니다.</>
+                                            )
                                         ) : (
                                             <>아직 관리자가 업로드한 {doc.title} 자료가 없습니다.</>
                                         )}
