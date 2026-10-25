@@ -784,6 +784,16 @@
         }
 
         function UserDashboard({ user, navigateTo, classes = [] }) {
+            // 선생님의 담당 수업 목록
+            const teacherClasses = user.role === 'teacher' 
+                ? classes.filter(c => isSchoolMatch(c.school, user.school) && c.teacher === user.name && c.teacherEmail === user.email)
+                : classes.filter(c => isSchoolMatch(c.school, user.school));
+
+            // 현재 선택된 수업 (드롭다운 선택 또는 첫 번째 수업)
+            const currentClass = user.selectedClassId 
+                ? classes.find(c => c.id === user.selectedClassId) 
+                : (teacherClasses[0] || null);
+
             const isWolmunSchoolUser = isSchoolMatch(user.school, '화성월문초등학교') || 
                                        isSchoolMatch(user.school, '화성월문초') || 
                                        (typeof user.school === 'string' && user.school.includes('월문'));
@@ -793,7 +803,17 @@
                                          isSchoolMatch(user.school, '인천영종고') || 
                                          (typeof user.school === 'string' && user.school.includes('영종'));
 
-            const isExemptSchoolUser = isWolmunSchoolUser || isYeongjongSchoolUser;
+            // 화성월문초: 로보미 아바타, 잼S 모두 미실시
+            const isCurrentClassWolmunExempt = user.role === 'teacher' && isWolmunSchoolUser;
+
+            // 인천영종고: 현재 선택된 수업이 '로보미 아바타' 계열일 때만 미실시! (잼S 등 다른 과목은 정상 성취도 평가 대상)
+            const currentClassName = (currentClass?.name || '').toLowerCase().replace(/\s+/g, '');
+            const isRobomi = currentClassName.includes('로보미') || currentClassName.includes('아바타') || currentClassName.includes('robome');
+            const isCurrentClassYeongjongExempt = user.role === 'teacher' && isYeongjongSchoolUser && (
+                currentClass ? isRobomi : false
+            );
+
+            const isExempt = isCurrentClassWolmunExempt || isCurrentClassYeongjongExempt;
 
             const banners = [
                 { id: 'plan', title: '수업운영 계획서', dbTypes: ['수업운영 계획서'], desc: '해당 학기의 전반적인 수업 운영 계획입니다.', iconImg: 'JEM S Video EN_.png', color: 'bg-white/85 border-white/60', textColor: 'text-robogram-blue', roles: ['teacher', 'instructor'] },
@@ -803,16 +823,16 @@
                     id: 'achievement', 
                     title: '수업성취도 보고서', 
                     dbTypes: ['수업성취도 보고서', '수업 성취도 보고서'], 
-                    desc: (user.role === 'teacher' && isWolmunSchoolUser)
+                    desc: isCurrentClassWolmunExempt
                         ? '화성월문초등학교는 학교측 요청으로 로보미 아바타 및 잼S 수업성취도 평가를 미실시하여 보고서가 존재하지 않습니다.'
-                        : (user.role === 'teacher' && isYeongjongSchoolUser)
+                        : isCurrentClassYeongjongExempt
                             ? '인천영종고등학교는 학교측 요청으로 로보미 아바타 수업성취도 평가를 미실시하여 보고서가 존재하지 않습니다.'
                             : '학생들의 학업 성취도 평가 결과입니다.', 
                     icon: <i className="fas fa-users text-[24px]"></i>, 
                     color: 'bg-white/85 border-white/60', 
                     textColor: 'text-purple-600', 
                     roles: ['teacher', 'instructor'],
-                    badge: (user.role === 'teacher' && isExemptSchoolUser) ? '학교측 요청 미실시' : null
+                    badge: isExempt ? '학교측 요청 미실시' : null
                 }
             ];
 
@@ -1438,8 +1458,9 @@
                                                                 </span>
                                                                 {(() => {
                                                                     const isWolmunClass = isSchoolMatch(c.school, '화성월문초등학교') || isSchoolMatch(c.school, '화성월문초') || (typeof c.school === 'string' && c.school.includes('월문'));
+                                                                    const cName = (c.name || '').toLowerCase().replace(/\s+/g, '');
                                                                     const isYeongjongClass = (isSchoolMatch(c.school, '인천영종고등학교') || isSchoolMatch(c.school, '영종고등학교') || isSchoolMatch(c.school, '인천영종고') || (typeof c.school === 'string' && c.school.includes('영종'))) && 
-                                                                                             (!c.name || c.name.includes('로보미') || c.name.includes('아바타') || (c.name || '').toLowerCase().includes('robome'));
+                                                                                             (cName.includes('로보미') || cName.includes('아바타') || cName.includes('robome'));
                                                                     if (isWolmunClass) {
                                                                         return (
                                                                             <span className="text-[10px] px-2 py-0.5 rounded-md font-bold border transition bg-amber-50 text-amber-700 border-amber-200" title="화성월문초등학교: 학교측 요청으로 성취도 평가 미실시">
@@ -1723,24 +1744,33 @@
                 return schoolMatch;
             });
 
+            // 인천영종고등학교: 오직 '로보미 아바타' 계열 수업만 학교측 요청 성취도 평가 미실시! (잼S 등 다른 과목은 정상 성취도 평가 대상)
             const yeongjongExemptClasses = userClasses.filter(c => {
                 const schoolMatch = isSchoolMatch(c.school, '인천영종고등학교') || 
                                     isSchoolMatch(c.school, '영종고등학교') || 
                                     isSchoolMatch(c.school, '인천영종고') || 
                                     (typeof c.school === 'string' && c.school.includes('영종')) ||
                                     isYeongjongSchoolUser;
+                if (!schoolMatch) return false;
                 const name = (c.name || '').toLowerCase().replace(/\s+/g, '');
-                const isRobomi = name.includes('로보미') || name.includes('robome') || name.includes('아바타');
-                return schoolMatch && (isRobomi || !c.name || userClasses.length === 1);
+                return name.includes('로보미') || name.includes('robome') || name.includes('아바타');
             });
 
-            const hasWolmunExempt = isWolmunSchoolUser || wolmunExemptClasses.length > 0;
-            const hasYeongjongExempt = isYeongjongSchoolUser || yeongjongExemptClasses.length > 0;
+            const hasWolmunExempt = user.role === 'teacher' ? (isWolmunSchoolUser && (wolmunExemptClasses.length > 0 || userClasses.length === 0)) : wolmunExemptClasses.length > 0;
+            // 인천영종고는 현재 선택된/조회 중인 수업이 '로보미 아바타' 미실시 수업일 때만 true! (잼S 선택 시 false)
+            const hasYeongjongExempt = yeongjongExemptClasses.length > 0;
             const hasExemptClass = hasWolmunExempt || hasYeongjongExempt;
 
             const hasErrorClass = errorClasses.length > 0;
-            // 학교요청 미실시 또는 접속오류 제외 정상 수업이 있을 때만 외부 평가 대시보드(roboeval) 접속 안내 노출
-            const hasNormalClass = user.role !== 'teacher' || (userClasses.length > errorClasses.length && !hasExemptClass);
+            
+            // 미실시 대상(오류, 화성월문초, 인천영종고 로보미아바타)을 제외하고 정상적인 성취도 평가 대상 수업이 있는지 확인
+            const excludedIds = new Set([
+                ...errorClasses.map(c => c.id),
+                ...wolmunExemptClasses.map(c => c.id),
+                ...yeongjongExemptClasses.map(c => c.id)
+            ]);
+            const normalClasses = userClasses.filter(c => !excludedIds.has(c.id));
+            const hasNormalClass = user.role !== 'teacher' || (normalClasses.length > 0 && !hasWolmunExempt);
 
             const handleFileOpen = (file) => {
                 if ((file.name.toLowerCase().endsWith('.html') || file.name.toLowerCase().endsWith('.pdf')) && file.content) {
