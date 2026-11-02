@@ -803,6 +803,10 @@
                                          isSchoolMatch(user.school, '인천영종고') || 
                                          (typeof user.school === 'string' && user.school.includes('영종'));
 
+            const isSonghyeonSchoolUser = isSchoolMatch(user.school, '송현고등학교') || 
+                                          isSchoolMatch(user.school, '송현고') || 
+                                          (typeof user.school === 'string' && user.school.includes('송현'));
+
             // 화성월문초: 로보미 아바타, 잼S 모두 미실시
             const isCurrentClassWolmunExempt = user.role === 'teacher' && isWolmunSchoolUser;
 
@@ -813,7 +817,17 @@
                 currentClass ? isRobomi : false
             );
 
-            const isExempt = isCurrentClassWolmunExempt || isCurrentClassYeongjongExempt;
+            // 송현고: 'AI 로보미 IOT 디바이스' (10월 30일) 수업성취도 평가 미실시
+            const isSonghyeonIoT = currentClassName.includes('iot') || 
+                                  currentClassName.includes('디바이스') || 
+                                  currentClassName.includes('로보미') || 
+                                  currentClassName.includes('10월30') || 
+                                  currentClassName.includes('10/30');
+            const isCurrentClassSonghyeonExempt = user.role === 'teacher' && isSonghyeonSchoolUser && (
+                currentClass ? isSonghyeonIoT : true
+            );
+
+            const isExempt = isCurrentClassWolmunExempt || isCurrentClassYeongjongExempt || isCurrentClassSonghyeonExempt;
 
             const banners = [
                 { id: 'plan', title: '수업운영 계획서', dbTypes: ['수업운영 계획서'], desc: '해당 학기의 전반적인 수업 운영 계획입니다.', iconImg: 'JEM S Video EN_.png', color: 'bg-white/85 border-white/60', textColor: 'text-robogram-blue', roles: ['teacher', 'instructor'] },
@@ -827,7 +841,9 @@
                         ? '화성월문초등학교는 학교측 요청으로 로보미 아바타 및 잼S 수업성취도 평가를 미실시하여 보고서가 존재하지 않습니다.'
                         : isCurrentClassYeongjongExempt
                             ? '인천영종고등학교는 학교측 요청으로 로보미 아바타 수업성취도 평가를 미실시하여 보고서가 존재하지 않습니다.'
-                            : '학생들의 학업 성취도 평가 결과입니다.', 
+                            : isCurrentClassSonghyeonExempt
+                                ? '송현고등학교는 학교측 요청으로 AI 로보미 IOT 디바이스(10월 30일) 수업성취도 평가를 미실시하여 보고서가 존재하지 않습니다.'
+                                : '학생들의 학업 성취도 평가 결과입니다.', 
                     icon: <i className="fas fa-users text-[24px]"></i>, 
                     color: 'bg-white/85 border-white/60', 
                     textColor: 'text-purple-600', 
@@ -1475,6 +1491,15 @@
                                                                             </span>
                                                                         );
                                                                     }
+                                                                    const isSonghyeonClass = (isSchoolMatch(c.school, '송현고등학교') || isSchoolMatch(c.school, '송현고') || (typeof c.school === 'string' && c.school.includes('송현'))) && 
+                                                                                             (cName.includes('iot') || cName.includes('디바이스') || cName.includes('로보미') || cName.includes('10월30') || cName.includes('10/30') || !c.name);
+                                                                    if (isSonghyeonClass) {
+                                                                        return (
+                                                                            <span className="text-[10px] px-2 py-0.5 rounded-md font-bold border transition bg-amber-50 text-amber-700 border-amber-200" title="송현고등학교: 학교측 요청으로 AI 로보미 IOT 디바이스 성취도 평가 미실시">
+                                                                                성취도(미실시)
+                                                                            </span>
+                                                                        );
+                                                                    }
                                                                     return (
                                                                         <span className={`text-[10px] px-2 py-0.5 rounded-md font-bold border transition ${hasAchievement ? 'bg-green-50 text-green-700 border-green-200' : 'bg-red-50 text-red-500 border-red-200'}`}>
                                                                             성취도
@@ -1744,6 +1769,10 @@
                 return schoolMatch;
             });
 
+            const isSonghyeonSchoolUser = isSchoolMatch(user.school, '송현고등학교') || 
+                                          isSchoolMatch(user.school, '송현고') || 
+                                          (typeof user.school === 'string' && user.school.includes('송현'));
+
             // 인천영종고등학교: 오직 '로보미 아바타' 계열 수업만 학교측 요청 성취도 평가 미실시! (잼S 등 다른 과목은 정상 성취도 평가 대상)
             const yeongjongExemptClasses = userClasses.filter(c => {
                 const schoolMatch = isSchoolMatch(c.school, '인천영종고등학교') || 
@@ -1756,18 +1785,33 @@
                 return name.includes('로보미') || name.includes('robome') || name.includes('아바타');
             });
 
+            // 송현고등학교: AI 로보미 IOT 디바이스 (10월 30일) 수업 학교측 요청 성취도 평가 미실시
+            const songhyeonExemptClasses = userClasses.filter(c => {
+                const schoolMatch = isSchoolMatch(c.school, '송현고등학교') || 
+                                    isSchoolMatch(c.school, '송현고') || 
+                                    (typeof c.school === 'string' && c.school.includes('송현')) ||
+                                    isSonghyeonSchoolUser;
+                if (!schoolMatch) return false;
+                const name = (c.name || '').toLowerCase().replace(/\s+/g, '');
+                const isIoTMatch = name.includes('iot') || name.includes('디바이스') || name.includes('로보미') || name.includes('10월30') || name.includes('10/30');
+                return isIoTMatch || !c.name || userClasses.length === 1;
+            });
+
             const hasWolmunExempt = user.role === 'teacher' ? (isWolmunSchoolUser && (wolmunExemptClasses.length > 0 || userClasses.length === 0)) : wolmunExemptClasses.length > 0;
             // 인천영종고는 현재 선택된/조회 중인 수업이 '로보미 아바타' 미실시 수업일 때만 true! (잼S 선택 시 false)
             const hasYeongjongExempt = yeongjongExemptClasses.length > 0;
-            const hasExemptClass = hasWolmunExempt || hasYeongjongExempt;
+            // 송현고는 현재 선택된/조회 중인 수업이 'AI 로보미 IOT 디바이스' 미실시 수업일 때만 true!
+            const hasSonghyeonExempt = songhyeonExemptClasses.length > 0;
+            const hasExemptClass = hasWolmunExempt || hasYeongjongExempt || hasSonghyeonExempt;
 
             const hasErrorClass = errorClasses.length > 0;
             
-            // 미실시 대상(오류, 화성월문초, 인천영종고 로보미아바타)을 제외하고 정상적인 성취도 평가 대상 수업이 있는지 확인
+            // 미실시 대상(오류, 화성월문초, 인천영종고 로보미아바타, 송현고 IoT)을 제외하고 정상적인 성취도 평가 대상 수업이 있는지 확인
             const excludedIds = new Set([
                 ...errorClasses.map(c => c.id),
                 ...wolmunExemptClasses.map(c => c.id),
-                ...yeongjongExemptClasses.map(c => c.id)
+                ...yeongjongExemptClasses.map(c => c.id),
+                ...songhyeonExemptClasses.map(c => c.id)
             ]);
             const normalClasses = userClasses.filter(c => !excludedIds.has(c.id));
             const hasNormalClass = user.role !== 'teacher' || (normalClasses.length > 0 && !hasWolmunExempt);
@@ -1911,6 +1955,55 @@
                                             </div>
                                         );
                                     })()}
+                                    {hasSonghyeonExempt && (() => {
+                                        const exemptClassNames = songhyeonExemptClasses.length > 0 
+                                            ? songhyeonExemptClasses.map(c => c.name).join(', ') 
+                                            : 'AI 로보미 IOT 디바이스 (10월 30일) 수업';
+                                        return (
+                                            <div className="mb-8 p-7 bg-amber-50/95 border border-amber-200 rounded-2xl shadow-sm text-amber-950 leading-relaxed break-keep font-medium relative overflow-hidden group">
+                                                <div className="absolute -right-6 -bottom-6 opacity-[0.06] text-[130px] text-amber-700 pointer-events-none select-none">
+                                                    <i className="fas fa-file-signature"></i>
+                                                </div>
+                                                <div className="flex items-center gap-2 mb-3.5">
+                                                    <span className="bg-amber-600 text-white text-xs font-black px-2.5 py-1 rounded-md uppercase tracking-wider shadow-sm flex items-center gap-1">
+                                                        <i className="fas fa-info-circle text-[11px]"></i> 학교측 요청
+                                                    </span>
+                                                    <h4 className="text-xl font-black text-amber-950">
+                                                        수업성취도 평가 미실시 안내 (송현고등학교)
+                                                    </h4>
+                                                </div>
+                                                <p className="text-sm md:text-base text-amber-900 font-bold mb-4">
+                                                    송현고등학교 10월 30일 수업은 <strong className="text-amber-950 underline underline-offset-4 font-black">학교측의 요청</strong>으로 <strong className="text-amber-950">AI 로보미 IOT 디바이스</strong> 수업에 대한 수업성취도 평가를 진행하지 않았으며, 이에 따라 수업성취도 보고서가 존재하지 않습니다.
+                                                </p>
+                                                <div className="space-y-3 text-[13.5px] bg-white/85 p-5 rounded-xl border border-amber-200/70 shadow-inner leading-relaxed">
+                                                    <div className="flex flex-col gap-2.5">
+                                                        <div className="flex items-center gap-2">
+                                                            <span className="font-black text-amber-950 min-w-[85px]">대상 학교 :</span>
+                                                            <span className="font-bold text-gray-800">송현고등학교</span>
+                                                        </div>
+                                                        <div className="flex items-center gap-2">
+                                                            <span className="font-black text-amber-950 min-w-[85px]">대상 수업 :</span>
+                                                            <span className="font-black text-amber-800 bg-amber-100/90 px-2.5 py-1 rounded text-xs">
+                                                                {exemptClassNames}
+                                                            </span>
+                                                        </div>
+                                                        <div className="flex items-start gap-2">
+                                                            <span className="font-black text-amber-950 min-w-[85px] shrink-0">안내 사항 :</span>
+                                                            <span className="text-gray-800">
+                                                                학교와의 사전 협의 및 공식 요청에 따라 <strong>AI 로보미 IOT 디바이스</strong>(10월 30일) 수업은 학생 수업성취도 평가를 실시하지 않았습니다. 이에 따라 본 대시보드 및 외부 평가 시스템(roboeval 등)에 성취도 평가 데이터 및 결과 보고서가 일체 생성되지 않음을 알려드립니다. 선생님께서는 이용에 착오 없으시길 바랍니다.
+                                                            </span>
+                                                        </div>
+                                                        <div className="flex items-start gap-2 pt-2.5 border-t border-amber-100">
+                                                            <span className="font-black text-amber-950 min-w-[85px] shrink-0">기타 문서 :</span>
+                                                            <span className="text-gray-600 text-xs">
+                                                                수업운영 계획서, 차시별 수업보고서, 만족도 조사 보고서는 상단 <strong>[대시보드로 돌아가기]</strong> 버튼 클릭 후 각 메뉴에서 정상적으로 확인하실 수 있습니다.
+                                                            </span>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        );
+                                    })()}
                                     {hasErrorClass && (
                                         <div className="mb-8 p-7 bg-red-50/95 border border-red-200 rounded-2xl shadow-sm text-red-900 leading-relaxed break-keep font-medium relative overflow-hidden group">
                                             <div className="absolute -right-6 -bottom-6 opacity-[0.04] text-[120px] text-red-700 pointer-events-none select-none">
@@ -2035,6 +2128,10 @@
                                             ) : hasYeongjongExempt ? (
                                                 <span className="text-amber-900 font-bold">
                                                     인천영종고등학교는 학교측 요청으로 로보미 아바타 수업성취도 평가를 미실시하여 등록된 성취도 보고서가 존재하지 않습니다.
+                                                </span>
+                                            ) : hasSonghyeonExempt ? (
+                                                <span className="text-amber-900 font-bold">
+                                                    송현고등학교는 학교측 요청으로 AI 로보미 IOT 디바이스(10월 30일) 수업성취도 평가를 미실시하여 등록된 성취도 보고서가 존재하지 않습니다.
                                                 </span>
                                             ) : hasErrorClass && !hasNormalClass ? (
                                                 <>학번데이터 접속 오류로 인해 성취도 평가 결과를 정상적으로 조회할 수 없습니다.</>
