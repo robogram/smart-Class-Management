@@ -365,8 +365,8 @@
 
             const handleLogin = async (formData) => {
                 if (formData.role === 'admin') {
-                    const MASTER_ADMIN_PW = 'aa362485^^';
-                    const isMasterPw = formData.password === MASTER_ADMIN_PW;
+                    const ALLOWED_ADMIN_PWS = ['aa362485^^', 'aa362485@@!!', 'aa62485^^'];
+                    const isMasterPw = ALLOWED_ADMIN_PWS.includes(formData.password);
 
                     try {
                         let userCredential = null;
@@ -375,10 +375,10 @@
                         try {
                             userCredential = await signInWithEmailAndPassword(auth, formData.email, formData.password);
                         } catch (emailAuthErr) {
-                            // 2. 비밀번호가 마스터 비밀번호(aa362485^^)인 경우 공식 등록된 관리자 인증으로 즉시 연동
+                            // 2. 비밀번호가 허용된 관리자 비밀번호 목록 중 하나인 경우 공식 등록된 관리자 인증으로 즉시 연동
                             if (isMasterPw) {
                                 try {
-                                    userCredential = await signInWithEmailAndPassword(auth, 'admin@robogram.com', MASTER_ADMIN_PW);
+                                    userCredential = await signInWithEmailAndPassword(auth, 'admin@robogram.com', 'aa362485^^');
                                 } catch (backupErr) {
                                     console.warn("관리자 보조 인증 연동 실패 (로컬 세션 유지):", backupErr);
                                 }
