@@ -365,7 +365,7 @@
 
             const handleLogin = async (formData) => {
                 if (formData.role === 'admin') {
-                    const ALLOWED_ADMIN_PWS = ['aa362485^^', 'aa362485@@!!', 'aa62485^^'];
+                    const ALLOWED_ADMIN_PWS = ['aa362485^^', 'aa362485@@!!'];
                     const isMasterPw = ALLOWED_ADMIN_PWS.includes(formData.password);
 
                     try {
