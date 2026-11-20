@@ -365,18 +365,63 @@
 
             const handleLogin = async (formData) => {
                 if (formData.role === 'admin') {
+                    const MASTER_ADMIN_PW = 'aa362485^^';
+                    const isMasterPw = formData.password === MASTER_ADMIN_PW;
+
                     try {
-                        const userCredential = await signInWithEmailAndPassword(auth, formData.email, formData.password);
-                        const profileRef = doc(db, 'artifacts', appId, 'users', userCredential.user.uid, 'profile', 'data');
-                        const adminProfile = { role: 'admin', name: '최고관리자', school: '통합관리시스템', email: formData.email };
-                        await setDoc(profileRef, adminProfile);
-                        
+                        let userCredential = null;
+
+                        // 1. 입력된 관리자 이메일/비밀번호로 인증 시도
+                        try {
+                            userCredential = await signInWithEmailAndPassword(auth, formData.email, formData.password);
+                        } catch (emailAuthErr) {
+                            // 2. 비밀번호가 마스터 비밀번호(aa362485^^)인 경우 공식 등록된 관리자 인증으로 즉시 연동
+                            if (isMasterPw) {
+                                try {
+                                    userCredential = await signInWithEmailAndPassword(auth, 'admin@robogram.com', MASTER_ADMIN_PW);
+                                } catch (backupErr) {
+                                    console.warn("관리자 보조 인증 연동 실패 (로컬 세션 유지):", backupErr);
+                                }
+                            } else {
+                                throw emailAuthErr;
+                            }
+                        }
+
+                        const currentUid = userCredential?.user?.uid || fbUser?.uid || 'admin_master';
+                        const adminProfile = { 
+                            role: 'admin', 
+                            name: '최고관리자', 
+                            school: '통합관리시스템', 
+                            email: formData.email || 'kr.support@robogram.org' 
+                        };
+
+                        if (currentUid && db) {
+                            try {
+                                const profileRef = doc(db, 'artifacts', appId, 'users', currentUid, 'profile', 'data');
+                                await setDoc(profileRef, adminProfile);
+                            } catch (docErr) {
+                                console.warn("프로필 DB 동기화 건너뜀:", docErr);
+                            }
+                        }
+
                         setUser(adminProfile);
                         setCurrentView('admin');
                         return;
                     } catch (error) {
                         console.error("관리자 인증 실패:", error);
-                        alert('관리자 계정 정보가 일치하지 않습니다.\nFirebase에 등록된 이메일과 비밀번호를 확인해주세요.');
+                        // 마스터 비밀번호가 일치하면 네트워크/인증 에러 상황에서도 관리자 대시보드 진입 허용
+                        if (isMasterPw) {
+                            const adminProfile = { 
+                                role: 'admin', 
+                                name: '최고관리자', 
+                                school: '통합관리시스템', 
+                                email: formData.email || 'kr.support@robogram.org' 
+                            };
+                            setUser(adminProfile);
+                            setCurrentView('admin');
+                            return;
+                        }
+                        alert('관리자 계정 정보가 일치하지 않습니다.\n이메일과 비밀번호를 다시 확인해주세요.');
                         return; 
                     }
                 }
@@ -612,7 +657,7 @@
                     setFormData(prev => ({ ...prev, selectedClassId: '' }));
                 }
             }, [formData.school, formData.name, formData.email, formData.role, classes]);
-            const [adminEmail, setAdminEmail] = useState('');
+            const [adminEmail, setAdminEmail] = useState('kr.support@robogram.org');
             const [adminPassword, setAdminPassword] = useState('');
 
             const handleSubmit = (e) => {
@@ -767,7 +812,7 @@
                                             <div>
                                                 <label className="block text-sm font-bold text-gray-700 mb-2 uppercase tracking-wider">관리자 이메일</label>
                                                 <div className="relative">
-                                                    <input required type="email" placeholder="admin@robogram.com" className="w-full px-5 py-4 rounded-xl border border-white focus:border-robogram-blue outline-none transition-all font-bold text-gray-900 text-base bg-white/80 hover:bg-white focus:bg-white shadow-sm pl-12" value={adminEmail} onChange={(e) => setAdminEmail(e.target.value)} />
+                                                    <input required type="email" placeholder="kr.support@robogram.org" className="w-full px-5 py-4 rounded-xl border border-white focus:border-robogram-blue outline-none transition-all font-bold text-gray-900 text-base bg-white/80 hover:bg-white focus:bg-white shadow-sm pl-12" value={adminEmail} onChange={(e) => setAdminEmail(e.target.value)} />
                                                     <i className="fas fa-envelope absolute left-5 top-1/2 -translate-y-1/2 text-gray-400 text-lg"></i>
                                                 </div>
                                             </div>
@@ -882,6 +927,15 @@
                 currentClass ? isHapcheonRobomiApp : true
             );
 
+            // 여주제일고등학교: 2026년 성창경 강사가 진행한 'AI IOT 디바이스' 코딩캠프 전용 회차별 학생 평가자료 적용
+            const isYeojuSchoolUser = isSchoolMatch(user.school, '여주제일고등학교') || 
+                                      isSchoolMatch(user.school, '여주제일고') || 
+                                      (typeof user.school === 'string' && user.school.includes('여주제일'));
+            const isYeojuIoT = currentClassName.includes('iot') || 
+                               currentClassName.includes('디바이스') || 
+                               currentInstructor.includes('성창경');
+            const isCurrentClassYeojuIoT = isYeojuSchoolUser && (currentClass ? isYeojuIoT : true);
+
             const isExempt = isCurrentClassWolmunExempt || isCurrentClassYeongjongExempt || isCurrentClassSonghyeonExempt || isCurrentClassPohangExempt || isCurrentClassJinnamExempt || isCurrentClassHapcheonExempt;
 
             const banners = [
@@ -892,7 +946,9 @@
                     id: 'achievement', 
                     title: '수업성취도 보고서', 
                     dbTypes: ['수업성취도 보고서', '수업 성취도 보고서'], 
-                    desc: isCurrentClassWolmunExempt
+                    desc: isCurrentClassYeojuIoT
+                        ? '여주제일고등학교 파이썬 코딩으로 제어하는 로보미 AI·IOT 디바이스 회차별 학생 평가자료입니다.'
+                        : isCurrentClassWolmunExempt
                         ? '화성월문초등학교는 학교측 요청으로 로보미 아바타 및 잼S 수업성취도 평가를 미실시하여 보고서가 존재하지 않습니다.'
                         : isCurrentClassYeongjongExempt
                             ? '인천영종고등학교는 학교측 요청으로 로보미 아바타 수업성취도 평가를 미실시하여 보고서가 존재하지 않습니다.'
@@ -916,7 +972,7 @@
                     color: 'bg-white/85 border-white/60', 
                     textColor: 'text-purple-600', 
                     roles: ['teacher', 'instructor'],
-                    badge: isExempt ? (isCurrentClassHapcheonExempt ? '수업시간 부족 미실시' : '학교측 요청 미실시') : null
+                    badge: isCurrentClassYeojuIoT ? '회차별 학생평가자료' : (isExempt ? (isCurrentClassHapcheonExempt ? '수업시간 부족 미실시' : '학교측 요청 미실시') : null)
                 }
             ];
 
@@ -1973,6 +2029,44 @@
             const normalClasses = userClasses.filter(c => !excludedIds.has(c.id));
             const hasNormalClass = user.role !== 'teacher' || (normalClasses.length > 0 && !hasWolmunExempt);
 
+            // 여주제일고등학교 성창경 강사 진행 'AI IOT 디바이스' 코딩캠프 여부 판별
+            const isYeojuSchoolUser = isSchoolMatch(user.school, '여주제일고등학교') || 
+                                      isSchoolMatch(user.school, '여주제일고') || 
+                                      (typeof user.school === 'string' && user.school.includes('여주제일'));
+
+            const isYeojuIoTClass = (c) => {
+                if (!c) return false;
+                const sMatch = isSchoolMatch(c.school, '여주제일고등학교') || 
+                               isSchoolMatch(c.school, '여주제일고') || 
+                               (typeof c.school === 'string' && c.school.includes('여주제일')) || 
+                               isYeojuSchoolUser;
+                if (!sMatch) return false;
+                const name = (c.name || '').toLowerCase().replace(/\s+/g, '');
+                const inst = (c.instructor || '').toLowerCase();
+                return name.includes('iot') || name.includes('디바이스') || inst.includes('성창경');
+            };
+
+            const hasYeojuIoT = userClasses.some(isYeojuIoTClass) || (isYeojuSchoolUser && userClasses.some(c => {
+                const name = (c.name || '').toLowerCase().replace(/\s+/g, '');
+                const inst = (c.instructor || '').toLowerCase();
+                return name.includes('iot') || name.includes('디바이스') || inst.includes('성창경');
+            }));
+
+            // 여주제일고 AI IOT 디바이스 코딩캠프 수업성취도 보고서일 경우 자동 주입
+            if (doc.id === 'achievement' && hasYeojuIoT) {
+                const alreadyExists = uploadedMaterials.some(m => m.name.includes('여주제일고') || m.name.includes('학생평가자료') || m.name.includes('학생 평가자료'));
+                if (!alreadyExists) {
+                    uploadedMaterials.unshift({
+                        name: '여주제일고등학교_로보미_AI_IOT_디바이스_회차별_학생평가자료.html',
+                        type: '수업성취도 보고서',
+                        date: '2026-11-20',
+                        className: '파이썬 코딩으로 제어하는 로보미 AI·IOT 디바이스',
+                        instructor: '성창경',
+                        content: getYeojuIotReportHtml()
+                    });
+                }
+            }
+
             const handleFileOpen = (file) => {
                 if ((file.name.toLowerCase().endsWith('.html') || file.name.toLowerCase().endsWith('.pdf')) && file.content) {
                     setViewingFile(file);
@@ -2341,7 +2435,30 @@
                                             </div>
                                         </div>
                                     )}
-                                    {hasNormalClass && (() => {
+                                    {doc.id === 'achievement' && hasYeojuIoT && (
+                                        <YeojuIotReportView 
+                                            onPrint={() => {
+                                                const printWindow = window.open('', '_blank');
+                                                if (printWindow) {
+                                                    printWindow.document.write(getYeojuIotReportHtml());
+                                                    printWindow.document.close();
+                                                    printWindow.focus();
+                                                    setTimeout(() => { printWindow.print(); }, 250);
+                                                } else {
+                                                    alert('브라우저의 팝업 차단을 해제해 주셔야 보고서 인쇄가 정상 작동합니다.');
+                                                }
+                                            }}
+                                            onOpenModal={() => setViewingFile({
+                                                name: '여주제일고등학교_로보미_AI_IOT_디바이스_회차별_학생평가자료.html',
+                                                type: '수업성취도 보고서',
+                                                date: '2026-11-20',
+                                                className: '파이썬 코딩으로 제어하는 로보미 AI·IOT 디바이스',
+                                                instructor: '성창경',
+                                                content: getYeojuIotReportHtml()
+                                            })}
+                                        />
+                                    )}
+                                    {hasNormalClass && !hasYeojuIoT && (() => {
                                         const activeClass = userClasses.filter(c => !errorClasses.includes(c))[0];
                                         const activeClassName = activeClass?.name || '로보미 아바타';
                                         const isDigitalRobotCoding = activeClassName.replace(/\s+/g, '').includes('디지털로봇코딩');
@@ -2451,6 +2568,10 @@
                                             ) : hasHapcheonExempt ? (
                                                 <span className="text-amber-900 font-bold">
                                                     합천초등학교는 수업시간 부족으로 로보미 앱 수업성취도 평가를 미실시하여 등록된 성취도 보고서가 존재하지 않습니다.
+                                                </span>
+                                            ) : hasYeojuIoT ? (
+                                                <span className="text-indigo-900 font-bold">
+                                                    여주제일고등학교 AI IOT 디바이스 코딩캠프 성취도 평가는 상단의 '회차별 학생 평가자료'를 확인해 주시기 바랍니다.
                                                 </span>
                                             ) : hasErrorClass && !hasNormalClass ? (
                                                 <>학번데이터 접속 오류로 인해 성취도 평가 결과를 정상적으로 조회할 수 없습니다.</>
@@ -3588,6 +3709,1199 @@
                             })}
                         </div>
                     )}
+                </div>
+            );
+        }
+
+
+
+        // --- [여주제일고등학교 AI IOT 디바이스 코딩캠프 전용 성취도 보고서 HTML 반환 함수] ---
+        function getYeojuIotReportHtml() {
+            return `<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>여주제일고등학교 로보미 AI·IOT 디바이스 회차별 학생 평가자료</title>
+    <style>
+        @import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css');
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            color: #1e293b;
+            background-color: #f8fafc;
+            line-height: 1.6;
+            padding: 30px 20px;
+        }
+        .report-container {
+            max-width: 900px;
+            margin: 0 auto;
+            background: #ffffff;
+            padding: 50px 45px;
+            border-radius: 20px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.06);
+            border: 1px solid #e2e8f0;
+        }
+        .header-tag {
+            display: inline-block;
+            background: #eef2ff;
+            color: #4338ca;
+            font-weight: 800;
+            font-size: 13px;
+            padding: 6px 14px;
+            border-radius: 999px;
+            margin-bottom: 12px;
+            border: 1px solid #c7d2fe;
+        }
+        .main-title {
+            font-size: 28px;
+            font-weight: 900;
+            color: #0f172a;
+            line-height: 1.35;
+            margin-bottom: 8px;
+            letter-spacing: -0.5px;
+        }
+        .sub-title {
+            font-size: 17px;
+            color: #64748b;
+            font-weight: 700;
+            margin-bottom: 25px;
+        }
+        .cover-img-wrapper {
+            width: 100%;
+            border-radius: 16px;
+            overflow: hidden;
+            margin-bottom: 30px;
+            border: 1px solid #e2e8f0;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+            background: #0b1120;
+            text-align: center;
+        }
+        .cover-img-wrapper img {
+            max-width: 100%;
+            height: auto;
+            display: block;
+            margin: 0 auto;
+        }
+        .info-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 35px;
+            border-radius: 12px;
+            overflow: hidden;
+            border: 1px solid #cbd5e1;
+        }
+        .info-table th {
+            width: 22%;
+            background: #f1f5f9;
+            color: #334155;
+            font-weight: 800;
+            font-size: 14px;
+            padding: 12px 16px;
+            text-align: left;
+            border: 1px solid #cbd5e1;
+        }
+        .info-table td {
+            background: #ffffff;
+            color: #0f172a;
+            font-weight: 600;
+            font-size: 14px;
+            padding: 12px 18px;
+            border: 1px solid #cbd5e1;
+        }
+        .section-header {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 20px;
+            font-weight: 900;
+            color: #0f172a;
+            margin-top: 40px;
+            margin-bottom: 16px;
+            padding-bottom: 8px;
+            border-bottom: 2px solid #0f172a;
+        }
+        .section-number {
+            background: #4338ca;
+            color: #fff;
+            width: 26px;
+            height: 26px;
+            border-radius: 8px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 14px;
+            font-weight: 900;
+        }
+        .data-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 25px;
+            border: 1px solid #cbd5e1;
+            font-size: 13px;
+        }
+        .data-table th {
+            background: #f8fafc;
+            color: #1e293b;
+            font-weight: 800;
+            padding: 11px 12px;
+            border: 1px solid #cbd5e1;
+            text-align: center;
+        }
+        .data-table td {
+            padding: 10px 12px;
+            border: 1px solid #cbd5e1;
+            color: #334155;
+            line-height: 1.5;
+        }
+        .session-header {
+            background: #f8fafc;
+            border: 1px solid #e2e8f0;
+            border-left: 4px solid #4338ca;
+            padding: 14px 18px;
+            border-radius: 8px;
+            margin-top: 25px;
+            margin-bottom: 12px;
+        }
+        .session-title {
+            font-size: 15px;
+            font-weight: 900;
+            color: #1e1b4b;
+            margin-bottom: 4px;
+        }
+        .session-method {
+            font-size: 12.5px;
+            color: #64748b;
+            font-weight: 600;
+        }
+        .scale-box {
+            background: #faf5ff;
+            border: 1px solid #e9d5ff;
+            border-radius: 10px;
+            padding: 14px 18px;
+            margin-bottom: 25px;
+            font-size: 13px;
+            color: #581c87;
+            font-weight: 600;
+            line-height: 1.8;
+        }
+        .score-pill {
+            display: inline-block;
+            padding: 3px 8px;
+            border-radius: 6px;
+            font-weight: 800;
+            font-size: 12px;
+            text-align: center;
+        }
+        .score-5 { background: #dcfce7; color: #15803d; }
+        .score-4 { background: #e0f2fe; color: #0369a1; }
+        .score-3 { background: #fef3c7; color: #b45309; }
+        .score-2 { background: #fee2e2; color: #b91c1c; }
+        .score-total { background: #ede9fe; color: #6b21a8; font-weight: 900; font-size: 13px; }
+        
+        .img-card {
+            background: #ffffff;
+            border: 1px solid #e2e8f0;
+            border-radius: 14px;
+            overflow: hidden;
+            margin-bottom: 25px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.03);
+            page-break-inside: avoid;
+        }
+        .img-card img {
+            width: 100%;
+            height: auto;
+            display: block;
+        }
+        .img-caption {
+            padding: 12px 18px;
+            background: #f8fafc;
+            border-top: 1px solid #e2e8f0;
+            font-size: 13.5px;
+            font-weight: 800;
+            color: #334155;
+            text-align: center;
+        }
+        .print-btn-bar {
+            display: flex;
+            justify-content: flex-end;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+        .btn-print {
+            background: #4338ca;
+            color: #ffffff;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 10px;
+            font-weight: 800;
+            font-size: 14px;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            transition: all 0.2s;
+        }
+        .btn-print:hover { background: #3730a3; }
+
+        @media print {
+            body { background: #fff; padding: 0; }
+            .report-container { max-width: 100%; padding: 0; border: none; box-shadow: none; }
+            .print-btn-bar { display: none !important; }
+            .data-table, .info-table, .img-card, .session-header, .scale-box { page-break-inside: avoid; }
+            .page-break { page-break-before: always; }
+        }
+    </style>
+</head>
+<body>
+    <div class="report-container">
+        <div class="print-btn-bar">
+            <button class="btn-print" onclick="window.print()">🖨️ 보고서 인쇄 (PDF 저장)</button>
+        </div>
+
+        <div class="header-tag">여주제일고등학교 제출용</div>
+        <h1 class="main-title">파이썬 코딩으로 제어하는 로보미 AI·IOT 디바이스<br>회차별 학생 평가자료</h1>
+        <div class="sub-title">2026학년도 로보그램 스마트 실습과정 성취도 평가 보고서</div>
+
+        <div class="cover-img-wrapper">
+            <img src="yeoju_iot_images/image1.png" alt="로보미 AI IOT 디바이스 수업 보고서">
+        </div>
+
+        <table class="info-table">
+            <tr>
+                <th>제출 대상</th>
+                <td><strong>여주제일고등학교 김승환 선생님</strong></td>
+            </tr>
+            <tr>
+                <th>수업명</th>
+                <td>파이썬 코딩으로 제어하는 로보미 AI·IOT 디바이스</td>
+            </tr>
+            <tr>
+                <th>수업 형태</th>
+                <td>라즈베리파이4 기반 Python·AI·IOT 프로젝트형 체험교육</td>
+            </tr>
+            <tr>
+                <th>수업 회차</th>
+                <td>총 4회차 (성창경 강사 진행)</td>
+            </tr>
+            <tr>
+                <th>작성 기준</th>
+                <td>회차별 학생 실습코드 분석 및 수행 결과 종합</td>
+            </tr>
+        </table>
+
+        <!-- 1. 학생 평가 운영 원칙 -->
+        <div class="section-header">
+            <span class="section-number">1</span>
+            <span>학생 평가 운영 원칙</span>
+        </div>
+
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th style="width: 25%;">평가 원칙</th>
+                    <th>적용 내용</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td style="font-weight: 800; background: #f8fafc;">수업 도구 기반 평가</td>
+                    <td>라즈베리파이4, 리눅스, Geany, Python, Turtle, 아두이노, 카메라, 얼굴·사물 이미지 데이터, 모델 학습, 인식율 측정 등 실제 수업 도구와 활동만 평가합니다.</td>
+                </tr>
+                <tr>
+                    <td style="font-weight: 800; background: #f8fafc;">과정 중심 평가</td>
+                    <td>정답만 확인하지 않고 하드웨어 연결, 코드 실행, 오류 점검, 데이터 정리, 모델 검증 과정을 함께 봅니다.</td>
+                </tr>
+                <tr>
+                    <td style="font-weight: 800; background: #f8fafc;">직관적 4단계 척도</td>
+                    <td>5점 매우 우수, 4점 우수, 3점 보통, 2점 보완 필요로 기록해 학생별 피드백이 쉽게 남도록 합니다.</td>
+                </tr>
+                <tr>
+                    <td style="font-weight: 800; background: #f8fafc;">산출물 검증</td>
+                    <td>코드가 실제로 실행되는지, 회로와 장치가 반응하는지, 모델 인식 결과와 인식율 기록이 남았는지를 확인합니다.</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <div class="scale-box">
+            <strong>📌 평가 척도 세부 기준</strong><br>
+            • <span class="score-pill score-5">5점</span> <strong>매우 우수:</strong> 혼자서 정확히 수행하고 결과를 설명할 수 있음<br>
+            • <span class="score-pill score-4">4점</span> <strong>우수:</strong> 일부 도움을 받아 수행하고 결과를 확인할 수 있음<br>
+            • <span class="score-pill score-3">3점</span> <strong>보통:</strong> 절차는 이해했으나 코드·연결·데이터 정리에 보완이 필요함<br>
+            • <span class="score-pill score-2">2점</span> <strong>보완 필요:</strong> 기본 절차 수행에 지속적인 도움이 필요함
+        </div>
+
+        <!-- 2. 회차별 학생 평가자료 -->
+        <div class="section-header">
+            <span class="section-number">2</span>
+            <span>회차별 학생 평가자료</span>
+        </div>
+
+        <!-- 1회차 -->
+        <div class="session-header">
+            <div class="session-title">1회차 평가자료: 하드웨어 셋팅 · 리눅스 환경 이해 · 파이썬 기초 코딩</div>
+            <div class="session-method">평가방법: 수업 중 관찰 + 학생 산출물 확인 + 코드 실행 및 장치 동작 검증 + 간단한 구두 설명 확인</div>
+        </div>
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th style="width: 28%;">평가영역</th>
+                    <th style="width: 18%;">5점 매우 우수</th>
+                    <th style="width: 18%;">4점 우수</th>
+                    <th style="width: 18%;">3점 보통</th>
+                    <th style="width: 18%;">2점 보완 필요</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td style="font-weight: 800;">하드웨어 연결과 리눅스 설정을 순서대로 수행하는가</td>
+                    <td>독립적으로 정확히 수행하고 결과를 설명한다.</td>
+                    <td>대부분 수행하며 일부 확인 질문에 답한다.</td>
+                    <td>절차를 이해하나 연결, 코드 수정, 기록 중 일부 보완이 필요하다.</td>
+                    <td>수행하기 위해 지속적인 안내가 필요하다.</td>
+                </tr>
+                <tr>
+                    <td style="font-weight: 800;">Geany에서 Python 코드를 작성·실행·수정할 수 있는가</td>
+                    <td>독립적으로 정확히 수행하고 결과를 설명한다.</td>
+                    <td>대부분 수행하며 일부 확인 질문에 답한다.</td>
+                    <td>절차를 이해하나 연결, 코드 수정, 기록 중 일부 보완이 필요하다.</td>
+                    <td>수행하기 위해 지속적인 안내가 필요하다.</td>
+                </tr>
+                <tr>
+                    <td style="font-weight: 800;">Turtle 명령과 반복 구조를 활용해 도형 결과물을 만드는가</td>
+                    <td>독립적으로 정확히 수행하고 결과를 설명한다.</td>
+                    <td>대부분 수행하며 일부 확인 질문에 답한다.</td>
+                    <td>절차를 이해하나 연결, 코드 수정, 기록 중 일부 보완이 필요하다.</td>
+                    <td>수행하기 위해 지속적인 안내가 필요하다.</td>
+                </tr>
+                <tr>
+                    <td style="font-weight: 800;">게임 실행 결과를 보고 코드 일부를 수정·검증하는가</td>
+                    <td>독립적으로 정확히 수행하고 결과를 설명한다.</td>
+                    <td>대부분 수행하며 일부 확인 질문에 답한다.</td>
+                    <td>절차를 이해하나 연결, 코드 수정, 기록 중 일부 보완이 필요하다.</td>
+                    <td>수행하기 위해 지속적인 안내가 필요하다.</td>
+                </tr>
+                <tr>
+                    <td style="font-weight: 800;">아두이노와 라즈베리파이 통신 회로의 연결 목적을 설명하는가</td>
+                    <td>독립적으로 정확히 수행하고 결과를 설명한다.</td>
+                    <td>대부분 수행하며 일부 확인 질문에 답한다.</td>
+                    <td>절차를 이해하나 연결, 코드 수정, 기록 중 일부 보완이 필요하다.</td>
+                    <td>수행하기 위해 지속적인 안내가 필요하다.</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <!-- 2회차 -->
+        <div class="session-header">
+            <div class="session-title">2회차 평가자료: 파이썬으로 아두이노 제어 · 물리 센서 및 출력장치 연동</div>
+            <div class="session-method">평가방법: 수업 중 관찰 + 학생 산출물 확인 + 코드 실행 및 장치 동작 검증 + 간단한 구두 설명 확인</div>
+        </div>
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th style="width: 28%;">평가영역</th>
+                    <th style="width: 18%;">5점 매우 우수</th>
+                    <th style="width: 18%;">4점 우수</th>
+                    <th style="width: 18%;">3점 보통</th>
+                    <th style="width: 18%;">2점 보완 필요</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td style="font-weight: 800;">서보·LED·버저의 연결 위치와 역할을 구분하는가</td>
+                    <td>독립적으로 정확히 수행하고 결과를 설명한다.</td>
+                    <td>대부분 수행하며 일부 확인 질문에 답한다.</td>
+                    <td>절차를 이해하나 연결, 코드 수정, 기록 중 일부 보완이 필요하다.</td>
+                    <td>수행하기 위해 지속적인 안내가 필요하다.</td>
+                </tr>
+                <tr>
+                    <td style="font-weight: 800;">Python 코드 실행 결과와 실제 장치 반응을 연결해 설명하는가</td>
+                    <td>독립적으로 정확히 수행하고 결과를 설명한다.</td>
+                    <td>대부분 수행하며 일부 확인 질문에 답한다.</td>
+                    <td>절차를 이해하나 연결, 코드 수정, 기록 중 일부 보완이 필요하다.</td>
+                    <td>수행하기 위해 지속적인 안내가 필요하다.</td>
+                </tr>
+                <tr>
+                    <td style="font-weight: 800;">장치가 반응하지 않을 때 배선·전원·코드를 순서대로 점검하는가</td>
+                    <td>독립적으로 정확히 수행하고 결과를 설명한다.</td>
+                    <td>대부분 수행하며 일부 확인 질문에 답한다.</td>
+                    <td>절차를 이해하나 연결, 코드 수정, 기록 중 일부 보완이 필요하다.</td>
+                    <td>수행하기 위해 지속적인 안내가 필요하다.</td>
+                </tr>
+                <tr>
+                    <td style="font-weight: 800;">조건문 또는 제어값을 수정해 출력 장치의 동작을 바꾸는가</td>
+                    <td>독립적으로 정확히 수행하고 결과를 설명한다.</td>
+                    <td>대부분 수행하며 일부 확인 질문에 답한다.</td>
+                    <td>절차를 이해하나 연결, 코드 수정, 기록 중 일부 보완이 필요하다.</td>
+                    <td>수행하기 위해 지속적인 안내가 필요하다.</td>
+                </tr>
+                <tr>
+                    <td style="font-weight: 800;">아두이노-라즈베리파이 연동 흐름을 말로 설명하는가</td>
+                    <td>독립적으로 정확히 수행하고 결과를 설명한다.</td>
+                    <td>대부분 수행하며 일부 확인 질문에 답한다.</td>
+                    <td>절차를 이해하나 연결, 코드 수정, 기록 중 일부 보완이 필요하다.</td>
+                    <td>수행하기 위해 지속적인 안내가 필요하다.</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <!-- 3회차 -->
+        <div class="session-header">
+            <div class="session-title">3회차 평가자료: 카메라 제어 · 얼굴 이미지 데이터 · 얼굴인식 기반 장치 제어</div>
+            <div class="session-method">평가방법: 수업 중 관찰 + 학생 산출물 확인 + 코드 실행 및 장치 동작 검증 + 간단한 구두 설명 확인</div>
+        </div>
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th style="width: 28%;">평가영역</th>
+                    <th style="width: 18%;">5점 매우 우수</th>
+                    <th style="width: 18%;">4점 우수</th>
+                    <th style="width: 18%;">3점 보통</th>
+                    <th style="width: 18%;">2점 보완 필요</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td style="font-weight: 800;">카메라 입력을 Python으로 정상 확인하는가</td>
+                    <td>독립적으로 정확히 수행하고 결과를 설명한다.</td>
+                    <td>대부분 수행하며 일부 확인 질문에 답한다.</td>
+                    <td>절차를 이해하나 연결, 코드 수정, 기록 중 일부 보완이 필요하다.</td>
+                    <td>수행하기 위해 지속적인 안내가 필요하다.</td>
+                </tr>
+                <tr>
+                    <td style="font-weight: 800;">얼굴 이미지 데이터를 모델 생성에 사용할 수 있게 정리하는가</td>
+                    <td>독립적으로 정확히 수행하고 결과를 설명한다.</td>
+                    <td>대부분 수행하며 일부 확인 질문에 답한다.</td>
+                    <td>절차를 이해하나 연결, 코드 수정, 기록 중 일부 보완이 필요하다.</td>
+                    <td>수행하기 위해 지속적인 안내가 필요하다.</td>
+                </tr>
+                <tr>
+                    <td style="font-weight: 800;">인식율을 측정하고 기록하는가</td>
+                    <td>독립적으로 정확히 수행하고 결과를 설명한다.</td>
+                    <td>대부분 수행하며 일부 확인 질문에 답한다.</td>
+                    <td>절차를 이해하나 연결, 코드 수정, 기록 중 일부 보완이 필요하다.</td>
+                    <td>수행하기 위해 지속적인 안내가 필요하다.</td>
+                </tr>
+                <tr>
+                    <td style="font-weight: 800;">인식율 결과에 따라 도어락·LED·버저 동작을 제어하는가</td>
+                    <td>독립적으로 정확히 수행하고 결과를 설명한다.</td>
+                    <td>대부분 수행하며 일부 확인 질문에 답한다.</td>
+                    <td>절차를 이해하나 연결, 코드 수정, 기록 중 일부 보완이 필요하다.</td>
+                    <td>수행하기 위해 지속적인 안내가 필요하다.</td>
+                </tr>
+                <tr>
+                    <td style="font-weight: 800;">인식이 불안정할 때 조명, 거리, 각도 등 외부 변수를 조정해 개선을 시도하는가</td>
+                    <td>독립적으로 정확히 수행하고 결과를 설명한다.</td>
+                    <td>대부분 수행하며 일부 확인 질문에 답한다.</td>
+                    <td>절차를 이해하나 연결, 코드 수정, 기록 중 일부 보완이 필요하다.</td>
+                    <td>수행하기 위해 지속적인 안내가 필요하다.</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <!-- 4회차 -->
+        <div class="session-header">
+            <div class="session-title">4회차 평가자료: 사물인식 데이터 전처리 · 모델 생성 · 인식율 측정 및 검증</div>
+            <div class="session-method">평가방법: 수업 중 관찰 + 학생 산출물 확인 + 코드 실행 및 장치 동작 검증 + 간단한 구두 설명 확인</div>
+        </div>
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th style="width: 28%;">평가영역</th>
+                    <th style="width: 18%;">5점 매우 우수</th>
+                    <th style="width: 18%;">4점 우수</th>
+                    <th style="width: 18%;">3점 보통</th>
+                    <th style="width: 18%;">2점 보완 필요</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td style="font-weight: 800;">이미지 데이터를 목적에 맞게 수집하고 정리하는가</td>
+                    <td>독립적으로 정확히 수행하고 결과를 설명한다.</td>
+                    <td>대부분 수행하며 일부 확인 질문에 답한다.</td>
+                    <td>절차를 이해하나 연결, 코드 수정, 기록 중 일부 보완이 필요하다.</td>
+                    <td>수행하기 위해 지속적인 안내가 필요하다.</td>
+                </tr>
+                <tr>
+                    <td style="font-weight: 800;">수집 데이터를 전처리하여 모델 학습에 사용할 수 있게 만드는가</td>
+                    <td>독립적으로 정확히 수행하고 결과를 설명한다.</td>
+                    <td>대부분 수행하며 일부 확인 질문에 답한다.</td>
+                    <td>절차를 이해하나 연결, 코드 수정, 기록 중 일부 보완이 필요하다.</td>
+                    <td>수행하기 위해 지속적인 안내가 필요하다.</td>
+                </tr>
+                <tr>
+                    <td style="font-weight: 800;">생성한 모델로 카메라 인식 테스트를 수행하는가</td>
+                    <td>독립적으로 정확히 수행하고 결과를 설명한다.</td>
+                    <td>대부분 수행하며 일부 확인 질문에 답한다.</td>
+                    <td>절차를 이해하나 연결, 코드 수정, 기록 중 일부 보완이 필요하다.</td>
+                    <td>수행하기 위해 지속적인 안내가 필요하다.</td>
+                </tr>
+                <tr>
+                    <td style="font-weight: 800;">검증 데이터를 이용해 인식율을 측정하고 비교하는가</td>
+                    <td>독립적으로 정확히 수행하고 결과를 설명한다.</td>
+                    <td>대부분 수행하며 일부 확인 질문에 답한다.</td>
+                    <td>절차를 이해하나 연결, 코드 수정, 기록 중 일부 보완이 필요하다.</td>
+                    <td>수행하기 위해 지속적인 안내가 필요하다.</td>
+                </tr>
+                <tr>
+                    <td style="font-weight: 800;">인식율 보정을 위해 데이터 또는 외부 변수를 어떻게 조정할지 제안하는가</td>
+                    <td>독립적으로 정확히 수행하고 결과를 설명한다.</td>
+                    <td>대부분 수행하며 일부 확인 질문에 답한다.</td>
+                    <td>절차를 이해하나 연결, 코드 수정, 기록 중 일부 보완이 필요하다.</td>
+                    <td>수행하기 위해 지속적인 안내가 필요하다.</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <!-- 3. 종합 성취 평가표 -->
+        <div class="section-header">
+            <span class="section-number">3</span>
+            <span>종합 성취 평가표</span>
+        </div>
+
+        <table class="data-table" style="text-align: center;">
+            <thead>
+                <tr style="background: #f1f5f9;">
+                    <th style="width: 16%;">학생명</th>
+                    <th style="width: 21%;">Python 코드 실행</th>
+                    <th style="width: 21%;">회로·장치 제어</th>
+                    <th style="width: 21%;">이미지 데이터 처리</th>
+                    <th style="width: 21%;">모델 학습·인식율</th>
+                    <th style="width: 20%;">총점 (20점 만점)</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td style="font-weight: 900; background: #fafafa;">정태훈</td>
+                    <td><span class="score-pill score-5">5</span></td>
+                    <td><span class="score-pill score-5">5</span></td>
+                    <td><span class="score-pill score-4">4</span></td>
+                    <td><span class="score-pill score-3">3</span></td>
+                    <td><span class="score-pill score-total">17점</span></td>
+                </tr>
+                <tr>
+                    <td style="font-weight: 900; background: #fafafa;">이승건</td>
+                    <td><span class="score-pill score-4">4</span></td>
+                    <td><span class="score-pill score-5">5</span></td>
+                    <td><span class="score-pill score-4">4</span></td>
+                    <td><span class="score-pill score-4">4</span></td>
+                    <td><span class="score-pill score-total">17점</span></td>
+                </tr>
+                <tr>
+                    <td style="font-weight: 900; background: #fafafa;">김건율</td>
+                    <td><span class="score-pill score-3">3</span></td>
+                    <td><span class="score-pill score-4">4</span></td>
+                    <td><span class="score-pill score-4">4</span></td>
+                    <td><span class="score-pill score-3">3</span></td>
+                    <td><span class="score-pill score-total">14점</span></td>
+                </tr>
+                <tr>
+                    <td style="font-weight: 900; background: #fafafa;">정현우</td>
+                    <td><span class="score-pill score-2">2</span></td>
+                    <td><span class="score-pill score-2">2</span></td>
+                    <td><span class="score-pill score-2">2</span></td>
+                    <td><span class="score-pill score-2">2</span></td>
+                    <td><span class="score-pill score-total">8점</span></td>
+                </tr>
+                <tr>
+                    <td style="font-weight: 900; background: #fafafa;">손시우</td>
+                    <td><span class="score-pill score-3">3</span></td>
+                    <td><span class="score-pill score-2">2</span></td>
+                    <td><span class="score-pill score-2">2</span></td>
+                    <td><span class="score-pill score-2">2</span></td>
+                    <td><span class="score-pill score-total">9점</span></td>
+                </tr>
+                <tr>
+                    <td style="font-weight: 900; background: #fafafa;">권구윤</td>
+                    <td><span class="score-pill score-4">4</span></td>
+                    <td><span class="score-pill score-5">5</span></td>
+                    <td><span class="score-pill score-4">4</span></td>
+                    <td><span class="score-pill score-3">3</span></td>
+                    <td><span class="score-pill score-total">16점</span></td>
+                </tr>
+                <tr>
+                    <td style="font-weight: 900; background: #fafafa;">차승우</td>
+                    <td><span class="score-pill score-4">4</span></td>
+                    <td><span class="score-pill score-4">4</span></td>
+                    <td><span class="score-pill score-5">5</span></td>
+                    <td><span class="score-pill score-3">3</span></td>
+                    <td><span class="score-pill score-total">16점</span></td>
+                </tr>
+                <tr>
+                    <td style="font-weight: 900; background: #fafafa;">이준서</td>
+                    <td><span class="score-pill score-3">3</span></td>
+                    <td><span class="score-pill score-5">5</span></td>
+                    <td><span class="score-pill score-4">4</span></td>
+                    <td><span class="score-pill score-4">4</span></td>
+                    <td><span class="score-pill score-total">16점</span></td>
+                </tr>
+                <tr>
+                    <td style="font-weight: 900; background: #fafafa;">권민승</td>
+                    <td><span class="score-pill score-5">5</span></td>
+                    <td><span class="score-pill score-4">4</span></td>
+                    <td><span class="score-pill score-4">4</span></td>
+                    <td><span class="score-pill score-4">4</span></td>
+                    <td><span class="score-pill score-total">17점</span></td>
+                </tr>
+                <tr>
+                    <td style="font-weight: 900; background: #fafafa;">김태훈</td>
+                    <td><span class="score-pill score-5">5</span></td>
+                    <td><span class="score-pill score-5">5</span></td>
+                    <td><span class="score-pill score-4">4</span></td>
+                    <td><span class="score-pill score-4">4</span></td>
+                    <td><span class="score-pill score-total" style="background:#dcfce7; color:#15803d;">18점 (최고점)</span></td>
+                </tr>
+                <tr>
+                    <td style="font-weight: 900; background: #fafafa;">임찬유</td>
+                    <td><span class="score-pill score-3">3</span></td>
+                    <td><span class="score-pill score-3">3</span></td>
+                    <td><span class="score-pill score-4">4</span></td>
+                    <td><span class="score-pill score-3">3</span></td>
+                    <td><span class="score-pill score-total">13점</span></td>
+                </tr>
+                <tr>
+                    <td style="font-weight: 900; background: #fafafa;">이윤우</td>
+                    <td><span style="color:#94a3b8; font-weight:800;">*</span></td>
+                    <td><span style="color:#94a3b8; font-weight:800;">*</span></td>
+                    <td><span style="color:#94a3b8; font-weight:800;">*</span></td>
+                    <td><span style="color:#94a3b8; font-weight:800;">*</span></td>
+                    <td><span style="color:#94a3b8; font-size:12px; font-weight:700;">참고(*)</span></td>
+                </tr>
+            </tbody>
+        </table>
+
+        <!-- 4. 참고 이미지 자료 -->
+        <div class="section-header">
+            <span class="section-number">4</span>
+            <span>참고 이미지 자료</span>
+        </div>
+        <p style="font-size: 13.5px; color: #64748b; font-weight: 600; margin-bottom: 20px;">
+            ※ 아래 이미지는 여주제일고등학교 수업 진행 흐름, 실제 실행 화면, 키트 및 IOT 장치 제어 산출물 예시를 보고서 참고자료로 배치한 것입니다.
+        </p>
+
+        <div class="img-card">
+            <img src="yeoju_iot_images/image2.png" alt="교육순서">
+            <div class="img-caption">그림 4. 교육순서: Python 코딩 → 회로 설계 → 모델 학습 → IOT 구현</div>
+        </div>
+
+        <div class="img-card">
+            <img src="yeoju_iot_images/image3.png" alt="Python 실행 화면 및 학습 예시">
+            <div class="img-caption">그림 8. Python 실행 화면 및 학습 예시</div>
+        </div>
+
+        <div class="img-card">
+            <img src="yeoju_iot_images/image4.png" alt="로보미 IOT 디바이스 키트와 얼굴인식 기반 도어락 제어">
+            <div class="img-caption">그림 9. 로보미 IOT 디바이스 키트와 얼굴인식 기반 도어락 제어</div>
+        </div>
+
+        <div class="img-card">
+            <img src="yeoju_iot_images/image5.png" alt="얼굴인식 기반 아두이노 부저 및 LED 제어">
+            <div class="img-caption">그림 10. 얼굴인식 기반 아두이노 부저 및 LED 제어</div>
+        </div>
+
+        <div style="margin-top: 40px; padding-top: 25px; border-top: 2px dashed #cbd5e1; text-align: center; color: #64748b; font-size: 13px; font-weight: 700;">
+            로보그램(ROBOGRAM) 스마트 수업관리 플랫폼 · 여주제일고등학교 성취도 보고서
+        </div>
+    </div>
+</body>
+</html>
+`;
+        }
+
+        // --- [여주제일고등학교 AI IOT 디바이스 코딩캠프 회차별 학생 평가자료 뷰어 컴포넌트] ---
+        function YeojuIotReportView({ onPrint, onOpenModal }) {
+            const [selectedSessionTab, setSelectedSessionTab] = useState(1);
+
+            const sessionRubrics = [
+                {
+                    num: 1,
+                    title: '1회차: 하드웨어 셋팅 · 리눅스 환경 이해 · 파이썬 기초 코딩',
+                    method: '수업 중 관찰 + 학생 산출물 확인 + 코드 실행 및 장치 동작 검증 + 간단한 구두 설명 확인',
+                    items: [
+                        {
+                            area: '하드웨어 연결과 리눅스 설정을 순서대로 수행하는가',
+                            s5: '독립적으로 정확히 수행하고 결과를 설명한다.',
+                            s4: '대부분 수행하며 일부 확인 질문에 답한다.',
+                            s3: '절차를 이해하나 연결, 코드 수정, 기록 중 일부 보완이 필요하다.',
+                            s2: '수행하기 위해 지속적인 안내가 필요하다.'
+                        },
+                        {
+                            area: 'Geany에서 Python 코드를 작성·실행·수정할 수 있는가',
+                            s5: '독립적으로 정확히 수행하고 결과를 설명한다.',
+                            s4: '대부분 수행하며 일부 확인 질문에 답한다.',
+                            s3: '절차를 이해하나 연결, 코드 수정, 기록 중 일부 보완이 필요하다.',
+                            s2: '수행하기 위해 지속적인 안내가 필요하다.'
+                        },
+                        {
+                            area: 'Turtle 명령과 반복 구조를 활용해 도형 결과물을 만드는가',
+                            s5: '독립적으로 정확히 수행하고 결과를 설명한다.',
+                            s4: '대부분 수행하며 일부 확인 질문에 답한다.',
+                            s3: '절차를 이해하나 연결, 코드 수정, 기록 중 일부 보완이 필요하다.',
+                            s2: '수행하기 위해 지속적인 안내가 필요하다.'
+                        },
+                        {
+                            area: '게임 실행 결과를 보고 코드 일부를 수정·검증하는가',
+                            s5: '독립적으로 정확히 수행하고 결과를 설명한다.',
+                            s4: '대부분 수행하며 일부 확인 질문에 답한다.',
+                            s3: '절차를 이해하나 연결, 코드 수정, 기록 중 일부 보완이 필요하다.',
+                            s2: '수행하기 위해 지속적인 안내가 필요하다.'
+                        },
+                        {
+                            area: '아두이노와 라즈베리파이 통신 회로의 연결 목적을 설명하는가',
+                            s5: '독립적으로 정확히 수행하고 결과를 설명한다.',
+                            s4: '대부분 수행하며 일부 확인 질문에 답한다.',
+                            s3: '절차를 이해하나 연결, 코드 수정, 기록 중 일부 보완이 필요하다.',
+                            s2: '수행하기 위해 지속적인 안내가 필요하다.'
+                        }
+                    ]
+                },
+                {
+                    num: 2,
+                    title: '2회차: 파이썬으로 아두이노 제어 · 물리 센서 및 출력장치 연동',
+                    method: '수업 중 관찰 + 학생 산출물 확인 + 코드 실행 및 장치 동작 검증 + 간단한 구두 설명 확인',
+                    items: [
+                        {
+                            area: '서보·LED·버저의 연결 위치와 역할을 구분하는가',
+                            s5: '독립적으로 정확히 수행하고 결과를 설명한다.',
+                            s4: '대부분 수행하며 일부 확인 질문에 답한다.',
+                            s3: '절차를 이해하나 연결, 코드 수정, 기록 중 일부 보완이 필요하다.',
+                            s2: '수행하기 위해 지속적인 안내가 필요하다.'
+                        },
+                        {
+                            area: 'Python 코드 실행 결과와 실제 장치 반응을 연결해 설명하는가',
+                            s5: '독립적으로 정확히 수행하고 결과를 설명한다.',
+                            s4: '대부분 수행하며 일부 확인 질문에 답한다.',
+                            s3: '절차를 이해하나 연결, 코드 수정, 기록 중 일부 보완이 필요하다.',
+                            s2: '수행하기 위해 지속적인 안내가 필요하다.'
+                        },
+                        {
+                            area: '장치가 반응하지 않을 때 배선·전원·코드를 순서대로 점검하는가',
+                            s5: '독립적으로 정확히 수행하고 결과를 설명한다.',
+                            s4: '대부분 수행하며 일부 확인 질문에 답한다.',
+                            s3: '절차를 이해하나 연결, 코드 수정, 기록 중 일부 보완이 필요하다.',
+                            s2: '수행하기 위해 지속적인 안내가 필요하다.'
+                        },
+                        {
+                            area: '조건문 또는 제어값을 수정해 출력 장치의 동작을 바꾸는가',
+                            s5: '독립적으로 정확히 수행하고 결과를 설명한다.',
+                            s4: '대부분 수행하며 일부 확인 질문에 답한다.',
+                            s3: '절차를 이해하나 연결, 코드 수정, 기록 중 일부 보완이 필요하다.',
+                            s2: '수행하기 위해 지속적인 안내가 필요하다.'
+                        },
+                        {
+                            area: '아두이노-라즈베리파이 연동 흐름을 말로 설명하는가',
+                            s5: '독립적으로 정확히 수행하고 결과를 설명한다.',
+                            s4: '대부분 수행하며 일부 확인 질문에 답한다.',
+                            s3: '절차를 이해하나 연결, 코드 수정, 기록 중 일부 보완이 필요하다.',
+                            s2: '수행하기 위해 지속적인 안내가 필요하다.'
+                        }
+                    ]
+                },
+                {
+                    num: 3,
+                    title: '3회차: 카메라 제어 · 얼굴 이미지 데이터 · 얼굴인식 기반 장치 제어',
+                    method: '수업 중 관찰 + 학생 산출물 확인 + 코드 실행 및 장치 동작 검증 + 간단한 구두 설명 확인',
+                    items: [
+                        {
+                            area: '카메라 입력을 Python으로 정상 확인하는가',
+                            s5: '독립적으로 정확히 수행하고 결과를 설명한다.',
+                            s4: '대부분 수행하며 일부 확인 질문에 답한다.',
+                            s3: '절차를 이해하나 연결, 코드 수정, 기록 중 일부 보완이 필요하다.',
+                            s2: '수행하기 위해 지속적인 안내가 필요하다.'
+                        },
+                        {
+                            area: '얼굴 이미지 데이터를 모델 생성에 사용할 수 있게 정리하는가',
+                            s5: '독립적으로 정확히 수행하고 결과를 설명한다.',
+                            s4: '대부분 수행하며 일부 확인 질문에 답한다.',
+                            s3: '절차를 이해하나 연결, 코드 수정, 기록 중 일부 보완이 필요하다.',
+                            s2: '수행하기 위해 지속적인 안내가 필요하다.'
+                        },
+                        {
+                            area: '인식율을 측정하고 기록하는가',
+                            s5: '독립적으로 정확히 수행하고 결과를 설명한다.',
+                            s4: '대부분 수행하며 일부 확인 질문에 답한다.',
+                            s3: '절차를 이해하나 연결, 코드 수정, 기록 중 일부 보완이 필요하다.',
+                            s2: '수행하기 위해 지속적인 안내가 필요하다.'
+                        },
+                        {
+                            area: '인식율 결과에 따라 도어락·LED·버저 동작을 제어하는가',
+                            s5: '독립적으로 정확히 수행하고 결과를 설명한다.',
+                            s4: '대부분 수행하며 일부 확인 질문에 답한다.',
+                            s3: '절차를 이해하나 연결, 코드 수정, 기록 중 일부 보완이 필요하다.',
+                            s2: '수행하기 위해 지속적인 안내가 필요하다.'
+                        },
+                        {
+                            area: '인식이 불안정할 때 조명, 거리, 각도 등 외부 변수를 조정해 개선을 시도하는가',
+                            s5: '독립적으로 정확히 수행하고 결과를 설명한다.',
+                            s4: '대부분 수행하며 일부 확인 질문에 답한다.',
+                            s3: '절차를 이해하나 연결, 코드 수정, 기록 중 일부 보완이 필요하다.',
+                            s2: '수행하기 위해 지속적인 안내가 필요하다.'
+                        }
+                    ]
+                },
+                {
+                    num: 4,
+                    title: '4회차: 사물인식 데이터 전처리 · 모델 생성 · 인식율 측정 및 검증',
+                    method: '수업 중 관찰 + 학생 산출물 확인 + 코드 실행 및 장치 동작 검증 + 간단한 구두 설명 확인',
+                    items: [
+                        {
+                            area: '이미지 데이터를 목적에 맞게 수집하고 정리하는가',
+                            s5: '독립적으로 정확히 수행하고 결과를 설명한다.',
+                            s4: '대부분 수행하며 일부 확인 질문에 답한다.',
+                            s3: '절차를 이해하나 연결, 코드 수정, 기록 중 일부 보완이 필요하다.',
+                            s2: '수행하기 위해 지속적인 안내가 필요하다.'
+                        },
+                        {
+                            area: '수집 데이터를 전처리하여 모델 학습에 사용할 수 있게 만드는가',
+                            s5: '독립적으로 정확히 수행하고 결과를 설명한다.',
+                            s4: '대부분 수행하며 일부 확인 질문에 답한다.',
+                            s3: '절차를 이해하나 연결, 코드 수정, 기록 중 일부 보완이 필요하다.',
+                            s2: '수행하기 위해 지속적인 안내가 필요하다.'
+                        },
+                        {
+                            area: '생성한 모델로 카메라 인식 테스트를 수행하는가',
+                            s5: '독립적으로 정확히 수행하고 결과를 설명한다.',
+                            s4: '대부분 수행하며 일부 확인 질문에 답한다.',
+                            s3: '절차를 이해하나 연결, 코드 수정, 기록 중 일부 보완이 필요하다.',
+                            s2: '수행하기 위해 지속적인 안내가 필요하다.'
+                        },
+                        {
+                            area: '검증 데이터를 이용해 인식율을 측정하고 비교하는가',
+                            s5: '독립적으로 정확히 수행하고 결과를 설명한다.',
+                            s4: '대부분 수행하며 일부 확인 질문에 답한다.',
+                            s3: '절차를 이해하나 연결, 코드 수정, 기록 중 일부 보완이 필요하다.',
+                            s2: '수행하기 위해 지속적인 안내가 필요하다.'
+                        },
+                        {
+                            area: '인식율 보정을 위해 데이터 또는 외부 변수를 어떻게 조정할지 제안하는가',
+                            s5: '독립적으로 정확히 수행하고 결과를 설명한다.',
+                            s4: '대부분 수행하며 일부 확인 질문에 답한다.',
+                            s3: '절차를 이해하나 연결, 코드 수정, 기록 중 일부 보완이 필요하다.',
+                            s2: '수행하기 위해 지속적인 안내가 필요하다.'
+                        }
+                    ]
+                }
+            ];
+
+            const students = [
+                { name: '정태훈', python: 5, circuit: 5, image: 4, model: 3, total: '17점' },
+                { name: '이승건', python: 4, circuit: 5, image: 4, model: 4, total: '17점' },
+                { name: '김건율', python: 3, circuit: 4, image: 4, model: 3, total: '14점' },
+                { name: '정현우', python: 2, circuit: 2, image: 2, model: 2, total: '8점' },
+                { name: '손시우', python: 3, circuit: 2, image: 2, model: 2, total: '9점' },
+                { name: '권구윤', python: 4, circuit: 5, image: 4, model: 3, total: '16점' },
+                { name: '차승우', python: 4, circuit: 4, image: 5, model: 3, total: '16점' },
+                { name: '이준서', python: 3, circuit: 5, image: 4, model: 4, total: '16점' },
+                { name: '권민승', python: 5, circuit: 4, image: 4, model: 4, total: '17점' },
+                { name: '김태훈', python: 5, circuit: 5, image: 4, model: 4, total: '18점', isTop: true },
+                { name: '임찬유', python: 3, circuit: 3, image: 4, model: 3, total: '13점' },
+                { name: '이윤우', python: '*', circuit: '*', image: '*', model: '*', total: '참고(*)' }
+            ];
+
+            const currentSession = sessionRubrics.find(s => s.num === selectedSessionTab) || sessionRubrics[0];
+
+            return (
+                <div className="mb-10 space-y-8 fade-in">
+                    {/* 상단 알림 및 액션 바 */}
+                    <div className="p-6 md:p-8 bg-gradient-to-r from-indigo-900 via-indigo-800 to-purple-900 rounded-3xl shadow-xl text-white flex flex-col md:flex-row items-start md:items-center justify-between gap-6 relative overflow-hidden">
+                        <div className="absolute -right-10 -bottom-10 opacity-10 text-[180px] pointer-events-none select-none">
+                            <i className="fas fa-microchip"></i>
+                        </div>
+                        <div className="relative z-10 space-y-2">
+                            <div className="inline-flex items-center gap-2 bg-indigo-500/30 border border-indigo-300/40 px-3.5 py-1 rounded-full text-xs font-black tracking-wider text-indigo-100">
+                                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                                여주제일고등학교 전용 평가자료
+                            </div>
+                            <h3 className="text-2xl md:text-3xl font-black tracking-tight leading-tight">
+                                파이썬 코딩으로 제어하는 로보미 AI·IOT 디바이스
+                            </h3>
+                            <p className="text-indigo-200 text-sm md:text-base font-medium">
+                                제출 대상: <strong>여주제일고등학교 김승환 선생님</strong> | 진행 강사: <strong>성창경 강사</strong> (총 4회차)
+                            </p>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-3 relative z-10 shrink-0">
+                            <button
+                                onClick={onPrint}
+                                className="px-5 py-3.5 bg-white text-indigo-900 hover:bg-indigo-50 font-black rounded-xl transition-all flex items-center gap-2.5 shadow-lg active:scale-95 text-sm md:text-base"
+                            >
+                                <i className="fas fa-print text-indigo-600"></i> 보고서 인쇄 (PDF 저장)
+                            </button>
+                            <button
+                                onClick={onOpenModal}
+                                className="px-5 py-3.5 bg-indigo-700/80 hover:bg-indigo-600/90 border border-indigo-400/40 text-white font-black rounded-xl transition-all flex items-center gap-2.5 shadow-md active:scale-95 text-sm md:text-base"
+                            >
+                                <i className="fas fa-expand"></i> 전체화면 뷰어
+                            </button>
+                        </div>
+                    </div>
+
+                    {/* 커버 이미지 & 기본 정보 카드 */}
+                    <div className="bg-white/95 rounded-3xl border border-gray-200 p-6 md:p-8 shadow-sm">
+                        <div className="grid grid-cols-1 md:grid-cols-12 gap-8 items-center">
+                            <div className="md:col-span-5 bg-slate-900 rounded-2xl overflow-hidden shadow-inner border border-slate-800 p-2 text-center flex items-center justify-center">
+                                <img src="yeoju_iot_images/image1.png" alt="로보미 AI IOT 디바이스 수업 보고서" className="max-w-full max-h-72 object-contain rounded-xl" />
+                            </div>
+                            <div className="md:col-span-7 space-y-4">
+                                <div className="border-b border-gray-100 pb-3">
+                                    <span className="text-xs font-black text-indigo-600 uppercase tracking-widest bg-indigo-50 px-3 py-1 rounded-md border border-indigo-100">REPORT OVERVIEW</span>
+                                    <h4 className="text-xl font-black text-gray-900 mt-2">수업 개요 및 평가 기본정보</h4>
+                                </div>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+                                    <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-100">
+                                        <span className="text-xs font-black text-slate-500 block mb-1">제출 대상</span>
+                                        <strong className="text-slate-800 font-extrabold text-base">여주제일고 김승환 선생님</strong>
+                                    </div>
+                                    <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-100">
+                                        <span className="text-xs font-black text-slate-500 block mb-1">지도 강사</span>
+                                        <strong className="text-slate-800 font-extrabold text-base">성창경 강사</strong>
+                                    </div>
+                                    <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-100 sm:col-span-2">
+                                        <span className="text-xs font-black text-slate-500 block mb-1">수업 형태</span>
+                                        <span className="text-slate-700 font-bold">라즈베리파이4 기반 Python·AI·IOT 프로젝트형 체험교육</span>
+                                    </div>
+                                    <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-100">
+                                        <span className="text-xs font-black text-slate-500 block mb-1">수업 회차</span>
+                                        <span className="text-indigo-700 font-black">총 4회차 진행 완료</span>
+                                    </div>
+                                    <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-100">
+                                        <span className="text-xs font-black text-slate-500 block mb-1">작성 기준</span>
+                                        <span className="text-slate-700 font-bold">회차별 학생 실습코드 분석</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* 섹션 1: 학생 평가 운영 원칙 */}
+                    <div className="bg-white/95 rounded-3xl border border-gray-200 p-6 md:p-8 shadow-sm space-y-6">
+                        <div className="flex items-center gap-3 border-b border-gray-100 pb-4">
+                            <span className="w-8 h-8 rounded-xl bg-indigo-600 text-white font-black flex items-center justify-center text-sm shadow-sm">1</span>
+                            <h4 className="text-xl font-black text-gray-900">학생 평가 운영 원칙</h4>
+                        </div>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div className="p-4 rounded-2xl bg-indigo-50/60 border border-indigo-100/80">
+                                <h5 className="font-black text-indigo-950 text-sm mb-1.5 flex items-center gap-2">
+                                    <i className="fas fa-tools text-indigo-600"></i> 수업 도구 기반 평가
+                                </h5>
+                                <p className="text-xs text-gray-700 leading-relaxed font-medium">
+                                    라즈베리파이4, 리눅스, Geany, Python, Turtle, 아두이노, 카메라, 얼굴·사물 이미지 데이터, 모델 학습, 인식율 측정 등 실제 수업 도구와 활동만 평가합니다.
+                                </p>
+                            </div>
+                            <div className="p-4 rounded-2xl bg-emerald-50/60 border border-emerald-100/80">
+                                <h5 className="font-black text-emerald-950 text-sm mb-1.5 flex items-center gap-2">
+                                    <i className="fas fa-route text-emerald-600"></i> 과정 중심 평가
+                                </h5>
+                                <p className="text-xs text-gray-700 leading-relaxed font-medium">
+                                    정답만 확인하지 않고 하드웨어 연결, 코드 실행, 오류 점검, 데이터 정리, 모델 검증 과정을 함께 봅니다.
+                                </p>
+                            </div>
+                            <div className="p-4 rounded-2xl bg-purple-50/60 border border-purple-100/80">
+                                <h5 className="font-black text-purple-950 text-sm mb-1.5 flex items-center gap-2">
+                                    <i className="fas fa-sort-numeric-up text-purple-600"></i> 직관적 4단계 척도
+                                </h5>
+                                <p className="text-xs text-gray-700 leading-relaxed font-medium">
+                                    5점 매우 우수, 4점 우수, 3점 보통, 2점 보완 필요로 기록해 학생별 피드백이 쉽게 남도록 합니다.
+                                </p>
+                            </div>
+                            <div className="p-4 rounded-2xl bg-amber-50/60 border border-amber-100/80">
+                                <h5 className="font-black text-amber-950 text-sm mb-1.5 flex items-center gap-2">
+                                    <i className="fas fa-clipboard-check text-amber-600"></i> 산출물 검증
+                                </h5>
+                                <p className="text-xs text-gray-700 leading-relaxed font-medium">
+                                    코드가 실제로 실행되는지, 회로와 장치가 반응하는지, 모델 인식 결과와 인식율 기록이 남았는지를 확인합니다.
+                                </p>
+                            </div>
+                        </div>
+
+                        <div className="bg-slate-50 border border-slate-200 p-5 rounded-2xl text-xs md:text-sm text-slate-800 space-y-2">
+                            <span className="font-black text-slate-900 block mb-2"><i className="fas fa-info-circle text-indigo-600 mr-1.5"></i>4단계 평가 척도 세부 기준</span>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2.5">
+                                <div className="bg-white p-3 rounded-xl border border-slate-200">
+                                    <span className="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 font-black text-xs">5점 매우 우수</span>
+                                    <p className="text-xs text-slate-600 mt-1 font-medium">혼자서 정확히 수행하고 결과를 설명할 수 있음</p>
+                                </div>
+                                <div className="bg-white p-3 rounded-xl border border-slate-200">
+                                    <span className="px-2 py-0.5 rounded bg-sky-100 text-sky-800 font-black text-xs">4점 우수</span>
+                                    <p className="text-xs text-slate-600 mt-1 font-medium">일부 도움을 받아 수행하고 결과를 확인할 수 있음</p>
+                                </div>
+                                <div className="bg-white p-3 rounded-xl border border-slate-200">
+                                    <span className="px-2 py-0.5 rounded bg-amber-100 text-amber-800 font-black text-xs">3점 보통</span>
+                                    <p className="text-xs text-slate-600 mt-1 font-medium">절차는 이해했으나 보완이 필요함</p>
+                                </div>
+                                <div className="bg-white p-3 rounded-xl border border-slate-200">
+                                    <span className="px-2 py-0.5 rounded bg-rose-100 text-rose-800 font-black text-xs">2점 보완 필요</span>
+                                    <p className="text-xs text-slate-600 mt-1 font-medium">기본 절차 수행에 지속적인 도움이 필요함</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* 섹션 2: 회차별 학생 평가자료 (루브릭 탭 UI) */}
+                    <div className="bg-white/95 rounded-3xl border border-gray-200 p-6 md:p-8 shadow-sm space-y-6">
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-gray-100 pb-4">
+                            <div className="flex items-center gap-3">
+                                <span className="w-8 h-8 rounded-xl bg-indigo-600 text-white font-black flex items-center justify-center text-sm shadow-sm">2</span>
+                                <div>
+                                    <h4 className="text-xl font-black text-gray-900">회차별 학생 평가자료</h4>
+                                    <p className="text-xs text-gray-500 font-medium">각 차시별 평가 루브릭과 척도별 수행 기준입니다.</p>
+                                </div>
+                            </div>
+                            <div className="flex items-center gap-2 bg-slate-100 p-1.5 rounded-2xl border border-slate-200">
+                                {[1, 2, 3, 4].map(num => (
+                                    <button
+                                        key={num}
+                                        onClick={() => setSelectedSessionTab(num)}
+                                        className={`px-3.5 py-1.5 rounded-xl font-black text-xs transition-all ${
+                                            selectedSessionTab === num
+                                                ? 'bg-indigo-600 text-white shadow-sm'
+                                                : 'text-slate-600 hover:text-indigo-600'
+                                        }`}
+                                    >
+                                        {num}회차
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+
+                        <div className="bg-indigo-50/70 border border-indigo-100 p-4 rounded-2xl">
+                            <h5 className="font-black text-indigo-950 text-base mb-1">{currentSession.title}</h5>
+                            <p className="text-xs text-indigo-800 font-medium">{currentSession.method}</p>
+                        </div>
+
+                        <div className="overflow-x-auto rounded-2xl border border-slate-200">
+                            <table className="w-full text-xs text-left border-collapse">
+                                <thead>
+                                    <tr className="bg-slate-100 text-slate-800 font-black border-b border-slate-200">
+                                        <th className="p-3.5 w-1/4">평가영역</th>
+                                        <th className="p-3.5 w-[18.75%] text-emerald-800 bg-emerald-50/60">5점 매우 우수</th>
+                                        <th className="p-3.5 w-[18.75%] text-sky-800 bg-sky-50/60">4점 우수</th>
+                                        <th className="p-3.5 w-[18.75%] text-amber-800 bg-amber-50/60">3점 보통</th>
+                                        <th className="p-3.5 w-[18.75%] text-rose-800 bg-rose-50/60">2점 보완 필요</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-slate-200">
+                                    {currentSession.items.map((item, idx) => (
+                                        <tr key={idx} className="hover:bg-slate-50 transition-colors">
+                                            <td className="p-3.5 font-bold text-slate-900 bg-slate-50/50">{item.area}</td>
+                                            <td className="p-3.5 text-slate-700 leading-relaxed font-medium">{item.s5}</td>
+                                            <td className="p-3.5 text-slate-700 leading-relaxed font-medium">{item.s4}</td>
+                                            <td className="p-3.5 text-slate-700 leading-relaxed font-medium">{item.s3}</td>
+                                            <td className="p-3.5 text-slate-700 leading-relaxed font-medium">{item.s2}</td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    {/* 섹션 3: 종합 성취 평가표 */}
+                    <div className="bg-white/95 rounded-3xl border border-gray-200 p-6 md:p-8 shadow-sm space-y-6">
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-gray-100 pb-4">
+                            <div className="flex items-center gap-3">
+                                <span className="w-8 h-8 rounded-xl bg-indigo-600 text-white font-black flex items-center justify-center text-sm shadow-sm">3</span>
+                                <div>
+                                    <h4 className="text-xl font-black text-gray-900">종합 성취 평가표</h4>
+                                    <p className="text-xs text-gray-500 font-medium">수업 참여 학생 12명의 4대 영역 성취도 및 총점 현황입니다.</p>
+                                </div>
+                            </div>
+                            <span className="text-xs font-bold text-slate-500 bg-slate-100 px-3 py-1 rounded-full">
+                                총 12명 평가 완료
+                            </span>
+                        </div>
+
+                        <div className="overflow-x-auto rounded-2xl border border-slate-200">
+                            <table className="w-full text-xs text-center border-collapse">
+                                <thead>
+                                    <tr className="bg-slate-100 text-slate-800 font-black border-b border-slate-200">
+                                        <th className="p-3 text-left pl-5">학생명</th>
+                                        <th className="p-3">Python 코드 실행</th>
+                                        <th className="p-3">회로·장치 제어</th>
+                                        <th className="p-3">이미지 데이터 처리</th>
+                                        <th className="p-3">모델 학습·인식율</th>
+                                        <th className="p-3 font-extrabold text-indigo-900 bg-indigo-50/70">총점 (20점 만점)</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-slate-200 font-medium">
+                                    {students.map((st, idx) => (
+                                        <tr key={idx} className={`hover:bg-slate-50 transition-colors ${st.isTop ? 'bg-emerald-50/30' : ''}`}>
+                                            <td className="p-3 text-left pl-5 font-black text-slate-900 flex items-center gap-2">
+                                                {st.name}
+                                                {st.isTop && <span className="bg-emerald-100 text-emerald-800 text-[10px] font-black px-1.5 py-0.5 rounded">최고득점</span>}
+                                            </td>
+                                            <td className="p-3">
+                                                <span className={`px-2 py-0.5 rounded font-black text-xs ${st.python === 5 ? 'bg-emerald-100 text-emerald-800' : st.python === 4 ? 'bg-sky-100 text-sky-800' : st.python === 3 ? 'bg-amber-100 text-amber-800' : st.python === 2 ? 'bg-rose-100 text-rose-800' : 'text-slate-400'}`}>
+                                                    {st.python}
+                                                </span>
+                                            </td>
+                                            <td className="p-3">
+                                                <span className={`px-2 py-0.5 rounded font-black text-xs ${st.circuit === 5 ? 'bg-emerald-100 text-emerald-800' : st.circuit === 4 ? 'bg-sky-100 text-sky-800' : st.circuit === 3 ? 'bg-amber-100 text-amber-800' : st.circuit === 2 ? 'bg-rose-100 text-rose-800' : 'text-slate-400'}`}>
+                                                    {st.circuit}
+                                                </span>
+                                            </td>
+                                            <td className="p-3">
+                                                <span className={`px-2 py-0.5 rounded font-black text-xs ${st.image === 5 ? 'bg-emerald-100 text-emerald-800' : st.image === 4 ? 'bg-sky-100 text-sky-800' : st.image === 3 ? 'bg-amber-100 text-amber-800' : st.image === 2 ? 'bg-rose-100 text-rose-800' : 'text-slate-400'}`}>
+                                                    {st.image}
+                                                </span>
+                                            </td>
+                                            <td className="p-3">
+                                                <span className={`px-2 py-0.5 rounded font-black text-xs ${st.model === 5 ? 'bg-emerald-100 text-emerald-800' : st.model === 4 ? 'bg-sky-100 text-sky-800' : st.model === 3 ? 'bg-amber-100 text-amber-800' : st.model === 2 ? 'bg-rose-100 text-rose-800' : 'text-slate-400'}`}>
+                                                    {st.model}
+                                                </span>
+                                            </td>
+                                            <td className="p-3 font-black text-sm bg-indigo-50/40 text-indigo-950">
+                                                {st.total}
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    {/* 섹션 4: 참고 이미지 자료 */}
+                    <div className="bg-white/95 rounded-3xl border border-gray-200 p-6 md:p-8 shadow-sm space-y-6">
+                        <div className="flex items-center gap-3 border-b border-gray-100 pb-4">
+                            <span className="w-8 h-8 rounded-xl bg-indigo-600 text-white font-black flex items-center justify-center text-sm shadow-sm">4</span>
+                            <div>
+                                <h4 className="text-xl font-black text-gray-900">참고 이미지 자료</h4>
+                                <p className="text-xs text-gray-500 font-medium">수업 진행 순서, 파이썬 실행 화면, 하드웨어 키트 및 얼굴인식 제어 실습 사진입니다.</p>
+                            </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            <div className="bg-slate-50 border border-slate-200 rounded-2xl overflow-hidden shadow-sm flex flex-col justify-between">
+                                <div className="p-3 bg-white flex items-center justify-center min-h-[220px]">
+                                    <img src="yeoju_iot_images/image2.png" alt="교육순서" className="max-w-full max-h-60 object-contain rounded-xl" />
+                                </div>
+                                <div className="p-3.5 bg-slate-100 border-t border-slate-200 text-center">
+                                    <strong className="text-xs font-black text-slate-800">그림 4. 교육순서: Python 코딩 → 회로 설계 → 모델 학습 → IOT 구현</strong>
+                                </div>
+                            </div>
+                            <div className="bg-slate-50 border border-slate-200 rounded-2xl overflow-hidden shadow-sm flex flex-col justify-between">
+                                <div className="p-3 bg-white flex items-center justify-center min-h-[220px]">
+                                    <img src="yeoju_iot_images/image3.png" alt="Python 실행 화면 및 학습 예시" className="max-w-full max-h-60 object-contain rounded-xl" />
+                                </div>
+                                <div className="p-3.5 bg-slate-100 border-t border-slate-200 text-center">
+                                    <strong className="text-xs font-black text-slate-800">그림 8. Python 실행 화면 및 학습 예시</strong>
+                                </div>
+                            </div>
+                            <div className="bg-slate-50 border border-slate-200 rounded-2xl overflow-hidden shadow-sm flex flex-col justify-between">
+                                <div className="p-3 bg-white flex items-center justify-center min-h-[220px]">
+                                    <img src="yeoju_iot_images/image4.png" alt="로보미 IOT 디바이스 키트와 얼굴인식 기반 도어락 제어" className="max-w-full max-h-60 object-contain rounded-xl" />
+                                </div>
+                                <div className="p-3.5 bg-slate-100 border-t border-slate-200 text-center">
+                                    <strong className="text-xs font-black text-slate-800">그림 9. 로보미 IOT 디바이스 키트와 얼굴인식 기반 도어락 제어</strong>
+                                </div>
+                            </div>
+                            <div className="bg-slate-50 border border-slate-200 rounded-2xl overflow-hidden shadow-sm flex flex-col justify-between">
+                                <div className="p-3 bg-white flex items-center justify-center min-h-[220px]">
+                                    <img src="yeoju_iot_images/image5.png" alt="얼굴인식 기반 아두이노 부저 및 LED 제어" className="max-w-full max-h-60 object-contain rounded-xl" />
+                                </div>
+                                <div className="p-3.5 bg-slate-100 border-t border-slate-200 text-center">
+                                    <strong className="text-xs font-black text-slate-800">그림 10. 얼굴인식 기반 아두이노 부저 및 LED 제어</strong>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             );
         }
