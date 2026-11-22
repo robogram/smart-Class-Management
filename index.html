@@ -931,10 +931,11 @@
             const isYeojuSchoolUser = isSchoolMatch(user.school, '여주제일고등학교') || 
                                       isSchoolMatch(user.school, '여주제일고') || 
                                       (typeof user.school === 'string' && user.school.includes('여주제일'));
-            const isYeojuIoT = currentClassName.includes('iot') || 
-                               currentClassName.includes('디바이스') || 
-                               currentInstructor.includes('성창경');
-            const isCurrentClassYeojuIoT = isYeojuSchoolUser && (currentClass ? isYeojuIoT : true);
+            const isYeojuIoT = (currentClassName.includes('iot') || currentClassName.includes('디바이스')) && 
+                               !currentClassName.includes('잼s') && 
+                               !currentClassName.includes('jem') && 
+                               !currentClassName.includes('로봇코딩');
+            const isCurrentClassYeojuIoT = isYeojuSchoolUser && (currentClass ? isYeojuIoT : false);
 
             const isExempt = isCurrentClassWolmunExempt || isCurrentClassYeongjongExempt || isCurrentClassSonghyeonExempt || isCurrentClassPohangExempt || isCurrentClassJinnamExempt || isCurrentClassHapcheonExempt;
 
@@ -2042,15 +2043,21 @@
                                isYeojuSchoolUser;
                 if (!sMatch) return false;
                 const name = (c.name || '').toLowerCase().replace(/\s+/g, '');
+                // 잼S나 로봇코딩 수업은 IoT 디바이스 평가자료 대상이 아님
+                if (name.includes('잼s') || name.includes('jem') || name.includes('로봇코딩') || name.includes('자율주행')) return false;
                 const inst = (c.instructor || '').toLowerCase();
-                return name.includes('iot') || name.includes('디바이스') || inst.includes('성창경');
+                return name.includes('iot') || name.includes('디바이스');
             };
 
-            const hasYeojuIoT = userClasses.some(isYeojuIoTClass) || (isYeojuSchoolUser && userClasses.some(c => {
+            const isCurrentClassJemS = userClasses.some(c => {
                 const name = (c.name || '').toLowerCase().replace(/\s+/g, '');
-                const inst = (c.instructor || '').toLowerCase();
-                return name.includes('iot') || name.includes('디바이스') || inst.includes('성창경');
-            }));
+                return name.includes('잼s') || name.includes('jem');
+            });
+
+            const hasYeojuIoT = !isCurrentClassJemS && (
+                userClasses.some(isYeojuIoTClass) || 
+                (isYeojuSchoolUser && userClasses.some(isYeojuIoTClass))
+            );
 
             // 여주제일고 AI IOT 디바이스 코딩캠프 수업성취도 보고서일 경우 자동 주입
             if (doc.id === 'achievement' && hasYeojuIoT) {
@@ -2463,14 +2470,22 @@
                                         const activeClassName = activeClass?.name || '로보미 아바타';
                                         const isDigitalRobotCoding = activeClassName.replace(/\s+/g, '').includes('디지털로봇코딩');
 
+                                        // 잼S 계열 수업은 roboeval 접속 과목명에 맞춰 '잼S'로 표시
+                                        const isJemSSubject = activeClassName.includes('잼S') || 
+                                                              activeClassName.includes('잼s') || 
+                                                              activeClassName.toLowerCase().includes('jem') || 
+                                                              (activeClass && ((activeClass.name || '').includes('잼S') || (activeClass.name || '').toLowerCase().includes('jem')));
+
                                         // 한국 반도체 마이스터고 및 로보미 아바타 계열 수업은 roboeval 접속 과목명에 맞춰 '로보미 아바타'로 표시
                                         const isSemiconductorSchool = isSchoolMatch(user.school, '한국 반도체 마이스터고') || 
                                                                     (activeClass && isSchoolMatch(activeClass.school, '한국 반도체 마이스터고'));
-                                        const displaySubjectName = (isSemiconductorSchool || 
-                                                                    activeClassName.includes('로보미 아바타') || 
-                                                                    activeClassName.includes('파이썬으로 제어하는 로보미 아바타'))
-                                                                    ? '로보미 아바타'
-                                                                    : activeClassName;
+                                        const displaySubjectName = isJemSSubject 
+                                            ? '잼S'
+                                            : (isSemiconductorSchool || 
+                                               activeClassName.includes('로보미 아바타') || 
+                                               activeClassName.includes('파이썬으로 제어하는 로보미 아바타'))
+                                               ? '로보미 아바타'
+                                               : activeClassName;
                                         return (
                                             <div className="mb-8 p-7 bg-purple-50/95 border border-purple-200 rounded-2xl shadow-sm text-purple-900 leading-relaxed break-keep font-medium relative overflow-hidden group">
                                                 <div className="absolute -right-6 -bottom-6 opacity-[0.04] text-[120px] text-purple-700 pointer-events-none select-none">
